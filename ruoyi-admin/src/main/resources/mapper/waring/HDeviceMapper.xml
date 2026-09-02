@@ -166,6 +166,9 @@
             <if test="name != null and name != ''">
                 AND `name` like concat('%', #{name}, '%')
             </if>
+            <if test="device_type != null and device_type != ''">
+                AND device_type = #{device_type}
+            </if>
             <if test="ip_addr != null and ip_addr != ''">
                 AND ip_addr like concat('%', #{ip_addr}, '%')
             </if>
