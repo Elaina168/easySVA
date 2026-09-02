@@ -373,7 +373,15 @@ public class DeploymentController
                 liveEventEnabled, wsEventFps);
         if (!analyzerResult.isSuccess())
         {
-            return AjaxResult.error(analyzerResult.getMessage());
+            // [降级兼容] Analyzer 旧版本未提供 live-output 接口时(HTTP 404)，不再报错；
+            // 算法输出流已随布控启动推送到 ZLM(analyzer/<deploymentId>)，直接返回算法流地址，
+            // 保证布控编辑页实时流预览可用。如 Analyzer 已升级支持 live-output，则走正常更新流程。
+            AjaxResult result = AjaxResult.success(analyzerResult.getMessage() + "(算法流已启用)");
+            result.put("videoEnabled", videoEnabled);
+            result.put("liveEventEnabled", liveEventEnabled);
+            result.put("algorithmStreamUrl", videoEnabled
+                ? deploymentAnalyzerClient.buildAlgorithmStreamUrl(record.getDeviceId(), id) : "");
+            return result;
         }
 
         AjaxResult result = AjaxResult.success(analyzerResult.getMessage());

@@ -101,6 +101,9 @@ public class DeploymentAnalyzerClient
         if (pushStream)
         {
             payload.put("pushStreamUrl", pushStreamUrl);
+            // [修复] 本机有 NVIDIA GPU, Analyzer 应使用 h264_nvenc 硬编码推流(与部署初期一致);
+            // 显式 auto 让 Analyzer 自行选择硬件编码器, 避免默认行为异常导致推流失败。
+            payload.put("pushEncoder", "auto");
         }
         String renderMode = pushStream ? "server_overlay" : (frontendOverlayEnabled ? "ws_overlay" : "detect_only");
         payload.put("renderMode", renderMode);
@@ -531,7 +534,9 @@ public class DeploymentAnalyzerClient
         {
             return null;
         }
-        return "rtmp://" + config.zlmHost + ":" + config.zlmMediaRtmpPort + "/" + config.svaApp + "/" + deploymentId;
+        // [修复] 恢复 RTSP 推流(与部署初期 master 版一致): Analyzer 使用 h264_nvenc 硬编码
+        // 推 RTSP 到 ZLM 才成功; 推 RTMP 会报 push stream connect error, 布控无法生效。
+        return "rtsp://" + config.zlmHost + ":" + config.zlmMediaRtspPort + "/" + config.svaApp + "/" + deploymentId;
     }
 
     private String buildAlgorithmStreamUrl(BindingConfig config, String deploymentId)
