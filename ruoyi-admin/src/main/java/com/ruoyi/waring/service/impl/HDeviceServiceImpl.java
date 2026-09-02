@@ -840,6 +840,10 @@ public class HDeviceServiceImpl implements HDeviceService {
                     dto.setPlatformId(key);
                     dto.setStreamId(key);
                     dto.setStatus("online");
+                    // 会话中携带播放地址（RTP/TS 会话一般含 play_url），用于前端预览；
+                    // 任务三接通真实国标设备后，若字段不同仅需调整此处映射。
+                    String playUrl = session.path("play_url").asText("");
+                    dto.setPlayUrl(StringUtils.isNotBlank(playUrl) ? playUrl : null);
                     devices.add(dto);
                 }
             }
