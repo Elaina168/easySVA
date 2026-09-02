@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
@@ -730,9 +731,21 @@ public class HDeviceServiceImpl implements HDeviceService {
             if (exist == null) {
                 // 不存在 -> 新增
                 HDevice device = buildGbDevice(gb, zlmServer);
-                hDeviceMapper.insertDeviceCrud(device);
-                synced++;
-                log.info("[GB28181] 新增国标设备: {}", gb.getDeviceId());
+                try {
+                    hDeviceMapper.insertDeviceCrud(device);
+                    synced++;
+                    log.info("[GB28181] 新增国标设备: {}", gb.getDeviceId());
+                } catch (DuplicateKeyException e) {
+                    // 并发同步下由唯一索引兜底：已被其他请求插入，改按更新处理
+                    HDevice duplicated = hDeviceMapper.selectByGbDeviceId(gb.getDeviceId());
+                    if (duplicated != null && StringUtils.isNotBlank(device.getPlay_url())) {
+                        duplicated.setPlay_url(device.getPlay_url());
+                        duplicated.setIs_online(device.getIs_online());
+                        hDeviceMapper.updateDevice(duplicated);
+                    }
+                    synced++;
+                    log.warn("[GB28181] 并发插入冲突(唯一索引兜底)，按更新处理: {}", gb.getDeviceId());
+                }
             } else {
                 // 存在 -> 更新（名称 / 在线状态 / 播放地址）
                 boolean changed = false;
