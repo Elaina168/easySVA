@@ -91,6 +91,8 @@ public class HWaringController extends BaseController implements SvaDetectEventC
     private static final String SVA_RELATION_APART_ALARM_TYPE_NAME = "目标远离告警";
     private static final String SVA_RELATION_NOT_CONTAINS_ALARM_TYPE = "SVA_RELATION_NOT_CONTAINS";
     private static final String SVA_RELATION_NOT_CONTAINS_ALARM_TYPE_NAME = "目标未包含告警";
+    private static final String SVA_SLEEP_ALARM_TYPE = "SVA_SLEEP";
+    private static final String SVA_SLEEP_ALARM_TYPE_NAME = "睡岗告警";
 
     @Autowired
     private RestTemplate restTemplate;
@@ -381,9 +383,12 @@ public class HWaringController extends BaseController implements SvaDetectEventC
 
             HWaring waring = new HWaring();
             waring.setId(UUID.randomUUID().toString().replace("-", ""));
-            waring.setAlarm_type("SVA_SIMPLE");
+            String behaviorType = resolveString(body, "behavior_type", "behaviorType", "alarm_type", "alarmType", "event_type", "eventType");
+            boolean isSleepAlarm = isSleepAlarmType(behaviorType);
+            waring.setAlarm_type(isSleepAlarm ? SVA_SLEEP_ALARM_TYPE : "SVA_SIMPLE");
             String customAlarmTypeName = resolveCustomAlarmTypeName(body);
-            waring.setAlarm_type_name(customAlarmTypeName.isEmpty() ? "SVA告警" : customAlarmTypeName);
+            waring.setAlarm_type_name(isSleepAlarm ? SVA_SLEEP_ALARM_TYPE_NAME
+                    : (customAlarmTypeName.isEmpty() ? "SVA告警" : customAlarmTypeName));
             waring.setSva_business_event_id(resolveLong(body, "businessEventId", "business_event_id"));
             waring.setSva_business_event_name(customAlarmTypeName.isEmpty() ? null : customAlarmTypeName);
             waring.setSva_business_template_id(resolveString(body, "businessTemplateId", "business_template_id", "templateId", "template_id"));
@@ -1235,6 +1240,20 @@ public class HWaringController extends BaseController implements SvaDetectEventC
             "business_event_name");
     }
 
+    /**
+     * 判断上报的告警类型是否为睡岗。
+     *
+     * @param type 上报的行为类型 / 告警类型字段
+     * @return true 表示睡岗告警
+     */
+    private boolean isSleepAlarmType(String type) {
+        if (type == null) {
+            return false;
+        }
+        String t = type.trim().toLowerCase(Locale.ROOT);
+        return t.contains("sleep") || t.contains("睡岗");
+    }
+
     private String normalizeBehaviorType(String behaviorType) {
         String normalized = behaviorType == null ? "" : behaviorType.trim().toLowerCase(Locale.ROOT);
         if ("cross_line".equals(normalized) || "enter_region".equals(normalized)
@@ -1243,7 +1262,8 @@ public class HWaringController extends BaseController implements SvaDetectEventC
             || "count_threshold".equals(normalized) || "occupancy".equals(normalized)
             || "direction_move".equals(normalized) || "direction_reverse".equals(normalized)
             || "relation_near".equals(normalized) || "relation_apart".equals(normalized)
-            || "relation_not_contains".equals(normalized)) {
+            || "relation_not_contains".equals(normalized)
+            || "sleep".equals(normalized) || "sleep_post".equals(normalized)) {
             return normalized;
         }
         return "";
@@ -1291,6 +1311,9 @@ public class HWaringController extends BaseController implements SvaDetectEventC
         }
         if ("relation_not_contains".equals(behaviorType)) {
             return new AlarmTypeMeta(SVA_RELATION_NOT_CONTAINS_ALARM_TYPE, SVA_RELATION_NOT_CONTAINS_ALARM_TYPE_NAME);
+        }
+        if ("sleep".equals(behaviorType) || "sleep_post".equals(behaviorType)) {
+            return new AlarmTypeMeta(SVA_SLEEP_ALARM_TYPE, SVA_SLEEP_ALARM_TYPE_NAME);
         }
         return null;
     }
