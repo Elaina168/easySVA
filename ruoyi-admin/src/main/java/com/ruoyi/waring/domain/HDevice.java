@@ -21,6 +21,9 @@ public class HDevice extends BaseEntity {
     private String zlm_proxy_key;
     private String resource_type;
     private String sub_type;
+    private String device_type;
+    private String gb_device_id;
+    private String gb_platform_id;
     @Excel(name = "IP地址")
     private String ip_addr;
     @Excel(name = "端口号")
