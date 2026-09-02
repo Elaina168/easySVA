@@ -490,8 +490,12 @@ public class HDeviceServiceImpl implements HDeviceService {
             throw new ServiceException("设备不存在: " + apeId);
         }
 
+        // GB28181 国标设备的 play_url 由 ZLM 国标推流长期提供，停止监控时保留；
+        // 仅非 GB28181 的 RTSP DIRECT 代理设备在停止时删除代理流并清空临时代理地址与代理 key。
+        boolean isGb28181Device = "gb28181".equalsIgnoreCase(existedDevice.getDevice_type());
+
         boolean directProxyDeleted = false;
-        if (isDirectDevice(existedDevice) && StringUtils.isNotBlank(existedDevice.getZlm_proxy_key())) {
+        if (!isGb28181Device && isDirectDevice(existedDevice) && StringUtils.isNotBlank(existedDevice.getZlm_proxy_key())) {
             try {
                 directProxyDeleted = deleteDirectStreamProxy(existedDevice);
             } catch (Exception e) {
@@ -504,9 +508,6 @@ public class HDeviceServiceImpl implements HDeviceService {
             throw new ServiceException("停止监控失败: " + apeId);
         }
 
-        // GB28181 国标设备的 play_url 由 ZLM 国标推流长期提供，停止监控时保留；
-        // 仅 RTSP DIRECT 代理设备在停止时清空临时代理地址与代理 key。
-        boolean isGb28181Device = "gb28181".equalsIgnoreCase(existedDevice.getDevice_type());
         if (!isGb28181Device) {
             hDeviceMapper.updatePlayUrlByApeId(apeId, null);
             if (directProxyDeleted) {
