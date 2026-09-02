@@ -24,6 +24,8 @@ public interface HDeviceService {
 
     Map<String, Object> getDirectLiveUrl(String apeId);
 
+    int syncGbDevices();
+
     List<HDevice> selectLDeviceList(HDevice device, Long userId);
 
     int startMonitor(String apeId);

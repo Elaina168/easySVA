@@ -206,4 +206,13 @@ public class HDeviceController extends BaseController {
         }
         return message;
     }
+
+    /**
+     * 同步 ZLMediaKit 中的 GB28181 国标设备（幂等）
+     */
+    @PostMapping("/gb28181/sync")
+    public AjaxResult syncGbDevices() {
+        int count = hDeviceService.syncGbDevices();
+        return AjaxResult.success("国标设备同步完成，共处理 " + count + " 台", count);
+    }
 }

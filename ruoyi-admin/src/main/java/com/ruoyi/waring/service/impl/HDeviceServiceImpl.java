@@ -12,6 +12,7 @@ import com.ruoyi.common.core.page.TableSupport;
 import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.system.mapper.SysDeptMapper;
 import com.ruoyi.system.mapper.SysUserMapper;
+import com.ruoyi.waring.domain.GbDeviceDTO;
 import com.ruoyi.waring.domain.HDevice;
 import com.ruoyi.waring.domain.ZlmServer;
 import com.ruoyi.waring.mapper.HDeviceMapper;
@@ -27,6 +28,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -702,5 +704,136 @@ public class HDeviceServiceImpl implements HDeviceService {
             return url;
         }
         return url.replaceAll("(?i)([?&](secret|token|access_token|auth|sign|signature)=)[^&]*", "$1***");
+    }
+
+
+    /**
+     * 同步 ZLMediaKit 中的 GB28181 国标设备到本地设备表（幂等）。
+     * 同一 gb_device_id 已存在则更新，不存在则新增。
+     *
+     * @return 本次处理的国标设备数量
+     */
+    @Override
+    public int syncGbDevices() {
+        ZlmServer zlmServer = zlmServerMapper.selectEnabledById(DEFAULT_SERVER_ID);
+        if (zlmServer == null) {
+            log.warn("[GB28181] 未找到启用的 ZLM 服务器，跳过国标设备同步");
+            return 0;
+        }
+        List<GbDeviceDTO> gbDevices = fetchGbDevicesFromZlm(zlmServer);
+        int synced = 0;
+        for (GbDeviceDTO gb : gbDevices) {
+            if (StringUtils.isBlank(gb.getDeviceId())) {
+                continue;
+            }
+            HDevice exist = hDeviceMapper.selectByGbDeviceId(gb.getDeviceId());
+            if (exist == null) {
+                // 不存在 -> 新增
+                HDevice device = buildGbDevice(gb, zlmServer);
+                hDeviceMapper.insertDeviceCrud(device);
+                synced++;
+                log.info("[GB28181] 新增国标设备: {}", gb.getDeviceId());
+            } else {
+                // 存在 -> 更新（名称 / 在线状态 / 播放地址）
+                boolean changed = false;
+                if (StringUtils.isNotBlank(gb.getName()) && !gb.getName().equals(exist.getName())) {
+                    exist.setName(gb.getName());
+                    changed = true;
+                }
+                String online = "online".equalsIgnoreCase(gb.getStatus()) ? "1" : "0";
+                if (StringUtils.isNotBlank(online) && !online.equals(exist.getIs_online())) {
+                    exist.setIs_online(online);
+                    changed = true;
+                }
+                if (StringUtils.isNotBlank(gb.getPlayUrl()) && !gb.getPlayUrl().equals(exist.getPlay_url())) {
+                    exist.setPlay_url(gb.getPlayUrl());
+                    changed = true;
+                }
+                if (changed) {
+                    hDeviceMapper.updateDevice(exist);
+                }
+                synced++;
+            }
+        }
+        log.info("[GB28181] 国标设备同步完成，共处理 {} 台", gbDevices.size());
+        return synced;
+    }
+
+    /**
+     * 从 ZLMediaKit 拉取 GB28181 国标设备列表（对接点）。
+     * <p>
+     * 当前 ZLMediaKit 的 GB28181(SIP) 接入由任务三（GB28181/ZLMediaKit 模块）负责，
+     * 本方法为通用默认实现：先探测 ZLM 可用性，再从 getAllSession 会话中识别国标设备。
+     * 待任务三提供实际调通的设备列表接口后，仅需调整本方法内的请求与字段映射。
+     */
+    private List<GbDeviceDTO> fetchGbDevicesFromZlm(ZlmServer zlmServer) {
+        List<GbDeviceDTO> devices = new ArrayList<>();
+        if (zlmServer == null || StringUtils.isBlank(zlmServer.getHost()) || zlmServer.getApi_port() == null) {
+            return devices;
+        }
+        String secret = StringUtils.isBlank(zlmServer.getSecret()) ? "" : zlmServer.getSecret();
+        try {
+            String url = UriComponentsBuilder
+                    .fromUriString("http://" + zlmServer.getHost() + ":" + zlmServer.getApi_port()
+                            + "/index/api/getAllSession")
+                    .queryParam("secret", secret)
+                    .build().toUriString();
+            ResponseEntity<String> resp = restTemplate.getForEntity(url, String.class);
+            if (resp.getBody() == null) {
+                return devices;
+            }
+            JsonNode root = OBJECT_MAPPER.readTree(resp.getBody());
+            if (root.path("code").asInt() != 0) {
+                log.warn("[GB28181] ZLM getAllSession 返回异常: {}", root.path("msg").asText("unknown"));
+                return devices;
+            }
+            JsonNode data = root.path("data");
+            if (!data.isArray()) {
+                return devices;
+            }
+            for (JsonNode session : data) {
+                String app = session.path("app").asText("");
+                String schema = session.path("schema").asText("");
+                String key = session.path("key").asText("");
+                // GB28181 国标设备经 SIP 注册后推流，ZLM 以 RTP/TS 会话承载；此处为通用识别。
+                boolean isGb = "rtp".equalsIgnoreCase(schema)
+                        || app.toLowerCase().contains("gb")
+                        || app.toLowerCase().contains("28181")
+                        || key.toLowerCase().startsWith("340200");
+                if (isGb && StringUtils.isNotBlank(key)) {
+                    GbDeviceDTO dto = new GbDeviceDTO();
+                    dto.setDeviceId(key);
+                    dto.setName(key);
+                    dto.setPlatformId(key);
+                    dto.setStreamId(key);
+                    dto.setStatus("online");
+                    devices.add(dto);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[GB28181] 从 ZLM 获取国标设备失败: {}", e.getMessage());
+        }
+        return devices;
+    }
+
+    /**
+     * 将 GB28181 设备 DTO 转换为本地设备实体。
+     */
+    private HDevice buildGbDevice(GbDeviceDTO gb, ZlmServer zlmServer) {
+        HDevice device = new HDevice();
+        device.setApe_id(StringUtils.isNotBlank(gb.getStreamId()) ? gb.getStreamId() : gb.getDeviceId());
+        device.setName(StringUtils.isNotBlank(gb.getName()) ? gb.getName() : gb.getDeviceId());
+        device.setDevice_type("gb28181");
+        device.setGb_device_id(gb.getDeviceId());
+        device.setGb_platform_id(gb.getPlatformId());
+        device.setStream_source_type("DIRECT");
+        device.setResource_type("gb28181");
+        device.setSub_type("gb28181");
+        device.setIs_online("online".equalsIgnoreCase(gb.getStatus()) ? "1" : "0");
+        device.setMonitor_status("STOPPED");
+        device.setPlay_url(gb.getPlayUrl());
+        device.setZlm_server_id(zlmServer.getId());
+        device.setSva_server_id(1L);
+        return device;
     }
 }
