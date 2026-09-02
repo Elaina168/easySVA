@@ -235,4 +235,14 @@
                 AND is_online != 1
         </where>
     </select>
+    <update id="updateGbDeviceOffline">
+        UPDATE h_device
+        SET is_online = '0'
+        WHERE device_type = 'gb28181'
+        <if test="activeIds != null and activeIds.size() > 0">
+            AND (gb_device_id IS NULL OR gb_device_id NOT IN
+            <foreach collection="activeIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
+        </if>
+    </update>
+
 </mapper>

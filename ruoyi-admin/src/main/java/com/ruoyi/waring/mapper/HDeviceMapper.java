@@ -35,6 +35,12 @@ public interface HDeviceMapper {
     int updateZlmProxyKeyByApeId(@Param("apeId") String apeId,
                                  @Param("zlmProxyKey") String zlmProxyKey);
 
+    /**
+     * 将本轮国标同步中未出现的本地 GB28181 设备置为离线。
+     * activeIds 为空时，表示 ZLM 当前无任何国标设备，全部置为离线。
+     */
+    int updateGbDeviceOffline(@Param("activeIds") List<String> activeIds);
+
     List<HDevice> selectDeviceList(HDevice device);
 
     List<HDevice> selectLDeviceList(HDevice device);

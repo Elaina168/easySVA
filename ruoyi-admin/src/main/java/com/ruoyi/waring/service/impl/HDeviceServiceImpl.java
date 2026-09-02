@@ -755,6 +755,17 @@ public class HDeviceServiceImpl implements HDeviceService {
                 synced++;
             }
         }
+        // 本轮未返回的本地国标设备统一置为离线（在线 -> 离线状态同步）
+        List<String> activeGbIds = new ArrayList<>();
+        for (GbDeviceDTO gb : gbDevices) {
+            if (StringUtils.isNotBlank(gb.getDeviceId())) {
+                activeGbIds.add(gb.getDeviceId());
+            }
+        }
+        int offlineUpdated = hDeviceMapper.updateGbDeviceOffline(activeGbIds);
+        if (offlineUpdated > 0) {
+            log.info("[GB28181] 国标设备离线状态同步完成，共更新 {} 台为离线", offlineUpdated);
+        }
         log.info("[GB28181] 国标设备同步完成，共处理 {} 台", gbDevices.size());
         return synced;
     }
