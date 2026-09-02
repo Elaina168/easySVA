@@ -747,15 +747,30 @@ public class HDeviceServiceImpl implements HDeviceService {
                     synced++;
                     log.info("[GB28181] 新增国标设备: {}", gb.getDeviceId());
                 } catch (DuplicateKeyException e) {
-                    // 并发同步下由唯一索引兜底：已被其他请求插入，改按更新处理
+                    // 唯一索引冲突：先按 gb_device_id 复查，确认是并发同步兜底场景
                     HDevice duplicated = hDeviceMapper.selectByGbDeviceId(gb.getDeviceId());
-                    if (duplicated != null && StringUtils.isNotBlank(device.getPlay_url())) {
-                        duplicated.setPlay_url(device.getPlay_url());
-                        duplicated.setIs_online(device.getIs_online());
-                        hDeviceMapper.updateDevice(duplicated);
+                    if (duplicated != null) {
+                        // 确认冲突来自 gb_device_id 唯一键（并发同步兜底）→ 按更新处理
+                        boolean changed = false;
+                        if (StringUtils.isNotBlank(device.getPlay_url())
+                                && !device.getPlay_url().equals(duplicated.getPlay_url())) {
+                            duplicated.setPlay_url(device.getPlay_url());
+                            changed = true;
+                        }
+                        if (StringUtils.isNotBlank(device.getIs_online())
+                                && !device.getIs_online().equals(duplicated.getIs_online())) {
+                            duplicated.setIs_online(device.getIs_online());
+                            changed = true;
+                        }
+                        if (changed) {
+                            hDeviceMapper.updateDevice(duplicated);
+                        }
+                        synced++;
+                        log.warn("[GB28181] 并发插入冲突(唯一索引兜底)，按更新处理: {}", gb.getDeviceId());
+                    } else {
+                        // 冲突并非 gb_device_id 唯一键（如 ape_id 映射冲突），视为真实插入失败，不吞异常
+                        log.error("[GB28181] 国标设备插入失败且未发现 gb_device_id 重复记录: {}, 原因: {}", gb.getDeviceId(), e.getMessage());
                     }
-                    synced++;
-                    log.warn("[GB28181] 并发插入冲突(唯一索引兜底)，按更新处理: {}", gb.getDeviceId());
                 }
             } else {
                 // 存在 -> 更新（名称 / 在线状态 / 播放地址）
