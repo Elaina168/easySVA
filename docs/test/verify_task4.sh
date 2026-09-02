@@ -2,14 +2,20 @@
 # =============================================================
 # easySVA 任务四：可重复执行的后端验证脚本
 # 分支：feature/java-backend
-# 前置：后端已部署并监听 9114；MySQL 库 easySVA 可用
-# 用法：bash docs/test/verify_task4.sh
+# 前置：后端已部署并监听 9114；MariaDB 库 easySVA 可用
+# 用法：
+#   MYSQL_PASSWORD='实际密码' bash docs/test/verify_task4.sh
+#   或先 export MYSQL_PASSWORD='实际密码' 再执行
 # 说明：脚本会自动创建/清理测试数据，可重复执行；
 #       任一步失败会以非 0 退出码结束。
+#       数据库密码通过环境变量 MYSQL_PASSWORD 传入，不写入脚本与记录。
 # =============================================================
 set -u
 B=${B:-http://127.0.0.1:9114}
-MYSQL="mysql -uroot -peasySVA.EZ easySVA"
+MYSQL_USER=${MYSQL_USER:-root}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:?请通过环境变量 MYSQL_PASSWORD 提供数据库密码}
+MYSQL="mysql -u${MYSQL_USER} -p${MYSQL_PASSWORD} easySVA"
+ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
 PASS=0
 FAIL=0
 
@@ -23,7 +29,7 @@ echo "=============================================="
 
 # 0) 登录
 TOKEN=$(curl -s -X POST "$B/login" -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin123"}' \
+  -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PASSWORD\"}" \
   | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))")
 if [ -z "$TOKEN" ]; then
   echo "  [FAIL] 无法登录，终止"
@@ -77,6 +83,26 @@ if echo "$START" | grep -q '"code":200'; then ok "GB 设备 startMonitor 成功"
 RUN=$($MYSQL -N -e "SELECT monitor_status FROM h_device WHERE ape_id='$APE';" 2>/dev/null)
 check "$RUN" "RUNNING" "GB 设备启动后 monitor_status=RUNNING"
 $MYSQL -e "DELETE FROM h_device WHERE ape_id='$APE';" 2>/dev/null
+
+# 6) ZLM 请求失败时保留原状态（不误置离线）—— 受控修改 ZLM api_port，结束后恢复
+APE_F=verify_gb_fail
+$MYSQL -e "DELETE FROM h_device WHERE ape_id='$APE_F';" 2>/dev/null
+$MYSQL -e "INSERT INTO h_device (ape_id, name, stream_source_type, device_type, gb_device_id, is_online, monitor_status, zlm_server_id, sva_server_id, create_time, update_time) VALUES
+ ('$APE_F','验证失败保留状态','DIRECT','gb28181','34020000001320000903','1','STOPPED',1,1,NOW(),NOW());" 2>/dev/null
+OLD_PORT=$($MYSQL -N -e "SELECT api_port FROM zlm_server WHERE id=1 LIMIT 1;" 2>/dev/null)
+if [ -n "$OLD_PORT" ]; then
+  # 无论脚本正常/异常退出都恢复 ZLM 端口
+  trap "$MYSQL -e \"UPDATE zlm_server SET api_port=$OLD_PORT WHERE id=1;\" >/dev/null 2>&1" EXIT
+  $MYSQL -e "UPDATE zlm_server SET api_port=1 WHERE id=1;" 2>/dev/null
+  curl -s -X POST "$B/waring/device/gb28181/sync" -H "Authorization: Bearer $TOKEN" > /dev/null
+  FAIL_ON=$($MYSQL -N -e "SELECT is_online FROM h_device WHERE ape_id='$APE_F';" 2>/dev/null)
+  check "$FAIL_ON" "1" "ZLM 请求失败时保留原状态（不误置离线）"
+  $MYSQL -e "UPDATE zlm_server SET api_port=$OLD_PORT WHERE id=1;" 2>/dev/null
+  trap - EXIT
+else
+  bad "无法读取 zlm_server.api_port，跳过失败场景"
+fi
+$MYSQL -e "DELETE FROM h_device WHERE ape_id='$APE_F';" 2>/dev/null
 
 echo "=============================================="
 echo " 结果：通过 $PASS 项，失败 $FAIL 项"
