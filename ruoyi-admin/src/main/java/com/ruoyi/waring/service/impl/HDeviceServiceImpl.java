@@ -451,7 +451,9 @@ public class HDeviceServiceImpl implements HDeviceService {
 
         String startAddProxyUrl = buildDirectAddProxyUrl(existedDevice);
         String startPlayUrl = buildDirectPlayUrl(existedDevice);
-        if (isDirectDevice(existedDevice)) {
+        // GB28181 国标设备不走 RTSP DIRECT 代理流：其播放地址由 ZLM 国标推流直接提供（play_url）
+        boolean isGb28181Device = "gb28181".equalsIgnoreCase(existedDevice.getDevice_type());
+        if (isDirectDevice(existedDevice) && !isGb28181Device) {
             Map<String, Object> directLiveInfo = getDirectLiveUrl(apeId);
             boolean addProxyAlreadyExists = Boolean.TRUE.equals(directLiveInfo.get("addProxyAlreadyExists"));
             if (addProxyAlreadyExists) {
