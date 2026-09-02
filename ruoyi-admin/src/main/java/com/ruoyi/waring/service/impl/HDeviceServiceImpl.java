@@ -724,6 +724,10 @@ public class HDeviceServiceImpl implements HDeviceService {
             return 0;
         }
         List<GbDeviceDTO> gbDevices = fetchGbDevicesFromZlm(zlmServer);
+        if (gbDevices == null) {
+            log.warn("[GB28181] 获取国标设备失败，跳过本次同步（不更新在线/离线状态）");
+            return 0;
+        }
         int synced = 0;
         for (GbDeviceDTO gb : gbDevices) {
             if (StringUtils.isBlank(gb.getDeviceId())) {
@@ -755,7 +759,7 @@ public class HDeviceServiceImpl implements HDeviceService {
                     exist.setName(gb.getName());
                     changed = true;
                 }
-                String online = "online".equalsIgnoreCase(gb.getStatus()) ? "1" : "0";
+                String online = normalizeGbStatus(gb.getStatus(), exist.getIs_online());
                 if (StringUtils.isNotBlank(online) && !online.equals(exist.getIs_online())) {
                     exist.setIs_online(online);
                     changed = true;
@@ -795,7 +799,8 @@ public class HDeviceServiceImpl implements HDeviceService {
     private List<GbDeviceDTO> fetchGbDevicesFromZlm(ZlmServer zlmServer) {
         List<GbDeviceDTO> devices = new ArrayList<>();
         if (zlmServer == null || StringUtils.isBlank(zlmServer.getHost()) || zlmServer.getApi_port() == null) {
-            return devices;
+            log.warn("[GB28181] ZLM 服务器配置缺失，跳过国标设备同步（保留原状态）");
+            return null;
         }
         String secret = StringUtils.isBlank(zlmServer.getSecret()) ? "" : zlmServer.getSecret();
         try {
@@ -806,16 +811,18 @@ public class HDeviceServiceImpl implements HDeviceService {
                     .build().toUriString();
             ResponseEntity<String> resp = restTemplate.getForEntity(url, String.class);
             if (resp.getBody() == null) {
-                return devices;
+                log.warn("[GB28181] ZLM getAllSession 响应为空，跳过本次同步（保留原状态）");
+                return null;
             }
             JsonNode root = OBJECT_MAPPER.readTree(resp.getBody());
             if (root.path("code").asInt() != 0) {
-                log.warn("[GB28181] ZLM getAllSession 返回异常: {}", root.path("msg").asText("unknown"));
-                return devices;
+                log.warn("[GB28181] ZLM getAllSession 返回异常: {}, 跳过本次同步（保留原状态）", root.path("msg").asText("unknown"));
+                return null;
             }
             JsonNode data = root.path("data");
             if (!data.isArray()) {
-                return devices;
+                log.warn("[GB28181] ZLM getAllSession 返回 data 非数组，跳过本次同步（保留原状态）");
+                return null;
             }
             for (JsonNode session : data) {
                 String app = session.path("app").asText("");
@@ -837,9 +844,28 @@ public class HDeviceServiceImpl implements HDeviceService {
                 }
             }
         } catch (Exception e) {
-            log.warn("[GB28181] 从 ZLM 获取国标设备失败: {}", e.getMessage());
+            log.warn("[GB28181] 从 ZLM 获取国标设备失败: {}, 跳过本次同步（保留原状态）", e.getMessage());
+            return null;
         }
         return devices;
+    }
+
+    /**
+     * 规整国标设备在线状态：识别常见在线/离线取值；未知状态返回 fallback（更新时保留原状态、新增时默认离线）。
+     */
+    private String normalizeGbStatus(String status, String fallback) {
+        if (StringUtils.isBlank(status)) {
+            return fallback;
+        }
+        String s = status.trim().toLowerCase();
+        switch (s) {
+            case "online": case "1": case "true": case "registered": case "connected": case "up":
+                return "1";
+            case "offline": case "0": case "false": case "unregistered": case "disconnected": case "down":
+                return "0";
+            default:
+                return fallback;
+        }
     }
 
     /**
@@ -855,7 +881,7 @@ public class HDeviceServiceImpl implements HDeviceService {
         device.setStream_source_type("DIRECT");
         device.setResource_type("gb28181");
         device.setSub_type("gb28181");
-        device.setIs_online("online".equalsIgnoreCase(gb.getStatus()) ? "1" : "0");
+        device.setIs_online(normalizeGbStatus(gb.getStatus(), "0"));
         device.setMonitor_status("STOPPED");
         device.setPlay_url(gb.getPlayUrl());
         device.setZlm_server_id(zlmServer.getId());
