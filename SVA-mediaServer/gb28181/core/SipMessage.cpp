@@ -193,7 +193,7 @@ bool SipMessage::parse(const std::string &wire,
     }
 
     const size_t bodyStart = headerEnd + delimiterSize;
-    size_t bodyLength = wire.size() - bodyStart;
+    size_t bodyLength = 0;
     const std::vector<std::string> lengthHeaders = parsed.headerValues("Content-Length");
     if (!lengthHeaders.empty()) {
         size_t declaredLength = 0;
