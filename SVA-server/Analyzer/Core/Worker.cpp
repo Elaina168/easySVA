@@ -13,8 +13,10 @@
 #include "Utils/Log.h"
 #include <chrono>
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <filesystem>
+#include <utility>
 extern "C"
 {
 #include <libavutil/imgutils.h>
@@ -26,6 +28,48 @@ namespace SVAAnalyzer
 {
     namespace
     {
+        constexpr float POSE_OVERLAY_CONFIDENCE = 0.35f;
+        constexpr std::array<std::pair<size_t, size_t>, 18> COCO_POSE_EDGES{{
+            {0, 1}, {0, 2}, {1, 3}, {2, 4}, {3, 5}, {4, 6},
+            {5, 6}, {5, 7}, {7, 9}, {6, 8}, {8, 10}, {5, 11},
+            {6, 12}, {11, 12}, {11, 13}, {13, 15}, {12, 14}, {14, 16},
+        }};
+
+        void drawPoseOverlay(cv::Mat &image, const DetectObject &detect)
+        {
+            if (!detect.hasPose)
+            {
+                return;
+            }
+            for (const auto &edge : COCO_POSE_EDGES)
+            {
+                const PoseKeypoint &start = detect.keypoints[edge.first];
+                const PoseKeypoint &end = detect.keypoints[edge.second];
+                if (start.confidence >= POSE_OVERLAY_CONFIDENCE &&
+                    end.confidence >= POSE_OVERLAY_CONFIDENCE)
+                {
+                    cv::line(image,
+                             cv::Point(cvRound(start.x), cvRound(start.y)),
+                             cv::Point(cvRound(end.x), cvRound(end.y)),
+                             cv::Scalar(0, 255, 0),
+                             2,
+                             cv::LINE_AA);
+                }
+            }
+            for (const PoseKeypoint &keypoint : detect.keypoints)
+            {
+                if (keypoint.confidence >= POSE_OVERLAY_CONFIDENCE)
+                {
+                    cv::circle(image,
+                               cv::Point(cvRound(keypoint.x), cvRound(keypoint.y)),
+                               3,
+                               cv::Scalar(0, 0, 255),
+                               -1,
+                               cv::LINE_AA);
+                }
+            }
+        }
+
         bool saveDetectEventSnapshot(Config *config,
                                      const std::string &controlCode,
                                      const cv::Mat &image,
@@ -985,6 +1029,8 @@ namespace SVAAnalyzer
                                 obj.className = src.class_name;
                                 obj.algorithmCode = src.source_algorithm;
                                 obj.happen = src.happen;
+                                obj.hasPose = src.hasPose;
+                                obj.keypoints = src.keypoints;
                                 obj.trackId = src.trackId;
                                 obj.firstSeenTimestampMs = src.firstSeenTimestampMs;
                                 obj.lastSeenTimestampMs = src.lastSeenTimestampMs;
@@ -1078,6 +1124,7 @@ namespace SVAAnalyzer
                                     std::string title = det.class_name + " " + classScoreBuf;
 
                                     cv::rectangle(image, cv::Rect(x1, y1, x2 - x1, y2 - y1), boxColor, boxThickness, cv::LINE_AA);
+                                    drawPoseOverlay(image, det);
 
                                     cv::Size text_size = cv::getTextSize(title, cv::FONT_HERSHEY_SIMPLEX, font_scale, font_thickness, nullptr);
                                     int text_bg_height = text_size.height + text_padding * 2;

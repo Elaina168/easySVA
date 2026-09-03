@@ -4,6 +4,7 @@
 #include "Worker.h"
 #include "Algorithm.h"
 #include "AlgorithmOnYolo.h"
+#include "AlgorithmOnYoloPose.h"
 #include "GenerateAlarmVideo.h"
 #include "Utils/Common.h"
 #include "Utils/Log.h"
@@ -141,6 +142,10 @@ namespace SVAAnalyzer
             delete on_yolo26n_80;
             on_yolo26n_80 = nullptr;
         }
+        if (on_yolo11n_pose) {
+            delete on_yolo11n_pose;
+            on_yolo11n_pose = nullptr;
+        }
 
         clearAlarmQueue();
         clearDetectFrameQueue();
@@ -187,7 +192,22 @@ namespace SVAAnalyzer
         modelPath = mConfig->modelDir + "/yolo26s.onnx";
         on_yolo26n_80 = new AlgorithmOnYolo(mConfig, modelPath, classNames, "on_yolo26n_80");
 
-        LOGI("initAlgorithm() end - total ONNX models loaded: 2");
+        int loadedModelCount = 2;
+        modelPath = mConfig->modelDir + "/yolo11n-pose.onnx";
+        std::ifstream poseModel(modelPath, std::ios::binary);
+        if (poseModel.good())
+        {
+            poseModel.close();
+            LOGI("初始化 on_yolo11n_pose (yolo11n-pose.onnx)");
+            on_yolo11n_pose = new AlgorithmOnYoloPose(mConfig, modelPath, "on_yolo11n_pose");
+            ++loadedModelCount;
+        }
+        else
+        {
+            LOGI("跳过 on_yolo11n_pose，模型不存在: %s", modelPath.c_str());
+        }
+
+        LOGI("initAlgorithm() end - total ONNX models loaded: %d", loadedModelCount);
         return true;
     }
     void Scheduler::loop()
@@ -750,6 +770,22 @@ namespace SVAAnalyzer
                 item["className"] = obj.className;
                 item["algorithmCode"] = obj.algorithmCode;
                 item["happen"] = obj.happen;
+                item["hasPose"] = obj.hasPose;
+                if (obj.hasPose)
+                {
+                    Json::Value keypoints(Json::arrayValue);
+                    for (size_t keypointIndex = 0; keypointIndex < obj.keypoints.size(); ++keypointIndex)
+                    {
+                        const PoseKeypoint &keypoint = obj.keypoints[keypointIndex];
+                        Json::Value point;
+                        point["index"] = static_cast<Json::UInt>(keypointIndex);
+                        point["x"] = keypoint.x;
+                        point["y"] = keypoint.y;
+                        point["confidence"] = keypoint.confidence;
+                        keypoints.append(point);
+                    }
+                    item["keypoints"] = keypoints;
+                }
                 item["trackId"] = obj.trackId;
                 item["ruleId"] = obj.ruleId;
                 item["customEventName"] = obj.customEventName;

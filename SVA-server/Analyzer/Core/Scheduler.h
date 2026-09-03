@@ -13,6 +13,7 @@
 #include <opencv2/opencv.hpp>
 #include "TrackMetadata.h"
 #include "TemporalContext.h"
+#include "PoseTypes.h"
 
 namespace SVAAnalyzer
 {
@@ -44,6 +45,8 @@ namespace SVAAnalyzer
 		std::string className;
 		std::string algorithmCode;
 		bool happen = false;
+		bool hasPose = false;
+		PoseKeypoints keypoints{};
 		
 		// Temporal tracking fields (populated by TemporalProcessor)
 		int trackId = -1;
@@ -290,6 +293,7 @@ namespace SVAAnalyzer
 		 */
 		Algorithm *on_yolo11n_80 = nullptr;
 		Algorithm *on_yolo26n_80 = nullptr;
+		Algorithm *on_yolo11n_pose = nullptr;
 		void loop();
 
 		void setState(bool state);

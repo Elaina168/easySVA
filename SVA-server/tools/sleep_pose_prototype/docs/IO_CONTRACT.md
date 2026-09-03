@@ -107,8 +107,8 @@ RECOVER --再次候选--> SLEEP（同一事件，不重复告警）
 
 ## C++ 接入检查表
 
-1. 新建 `AlgorithmOnYoloPose`，按实际 `model_io.json` 解析 Pose 输出。
-2. 扩展检测结果结构，使每个人框携带 17 个 `(x, y, confidence)`。
+1. 使用独立的 `AlgorithmOnYoloPose`，按实际 `model_io.json` 解析 Pose 输出；不要让通用检测解码器兼容两种张量语义。（已完成）
+2. 扩展检测结果结构，使每个人框携带 17 个 `(x, y, confidence)`，并通过事件 JSON 输出。（已完成）
 3. 确认人框 NMS 后关键点仍与对应人物保持同一索引。
 4. 把 track ID、时间戳、Pose 特征放入每路视频独立的时序上下文。
 5. 移植 NORMAL/SUSPECT/SLEEP/RECOVER 状态机并读取规则参数。

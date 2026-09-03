@@ -100,10 +100,8 @@ python export_onnx.py \
 
 ## 6. C++ 集成边界
 
-原型达到验收指标后再实施：
+阶段二已经加入独立的 C++ Pose 推理器、17 点输出和离线视频验证工具，构建与验证步骤见 `docs/CPP_POSE_INTEGRATION.md`。后续仍需实施：
 
-- 新增 Pose 专用 ONNX 解码器，不修改现有检测模型解码器去兼容两种输出；
-- 给 `DetectObject` 增加 17 个关键点及置信度；
 - 复用 `Scheduler` 的流处理和后端现有的 `behavior_type=sleep` 告警通道；
 - 按 `track_id` 保存时序状态，把本目录的特征和状态机逻辑逐项移植；
 - 用相同视频对比 Python 与 C++ 的人框、关键点、状态跳转和事件时间，允许的数值误差需要写入验收记录。

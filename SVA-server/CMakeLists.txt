@@ -40,6 +40,7 @@ set(source
         Analyzer/Core/Utils/GeometryUtils.cpp
         Analyzer/Core/Algorithm.cpp
         Analyzer/Core/AlgorithmOnYolo.cpp
+        Analyzer/Core/AlgorithmOnYoloPose.cpp
         Analyzer/Core/Analyzer.cpp
         Analyzer/Core/AvPullStream.cpp
         Analyzer/Core/AvPushStream.cpp
@@ -62,3 +63,18 @@ endif()
 target_link_libraries(Analyzer ${OpenCV_LIBS})
 target_link_libraries(Analyzer event curl crypto jsoncpp avformat avcodec avutil swscale swresample pthread)
 target_link_libraries(Analyzer onnxruntime) #onnxruntime
+
+option(SVA_BUILD_POSE_SMOKE_TEST "Build the standalone YOLO Pose video smoke test" ON)
+if(SVA_BUILD_POSE_SMOKE_TEST)
+  add_executable(PoseSmokeTest
+          Analyzer/Tools/PoseSmokeTest.cpp
+          Analyzer/Core/Algorithm.cpp
+          Analyzer/Core/AlgorithmOnYoloPose.cpp)
+  target_include_directories(PoseSmokeTest PRIVATE Analyzer/Core)
+  if(SVA_ONNXRUNTIME_GPU)
+    target_compile_definitions(PoseSmokeTest PRIVATE SVA_ONNXRUNTIME_GPU=1)
+  else()
+    target_compile_definitions(PoseSmokeTest PRIVATE SVA_ONNXRUNTIME_GPU=0)
+  endif()
+  target_link_libraries(PoseSmokeTest ${OpenCV_LIBS} onnxruntime pthread)
+endif()
