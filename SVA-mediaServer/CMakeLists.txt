@@ -554,11 +554,11 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/3rdpart)
 
 add_subdirectory(3rdpart)
 
+add_subdirectory(src)
+
 if(ENABLE_GB28181_SIGNALING)
   add_subdirectory(gb28181)
 endif()
-
-add_subdirectory(src)
 
 add_subdirectory(ext-codec)
 

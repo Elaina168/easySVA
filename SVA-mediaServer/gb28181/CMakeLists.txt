@@ -40,7 +40,9 @@ set(GB28181_SERVICE_SOURCES
   service/SipRequestFactory.cpp
   service/SipRequestFactory.h
   service/SipRequestProcessor.cpp
-  service/SipRequestProcessor.h)
+  service/SipRequestProcessor.h
+  service/ZlmApiClient.cpp
+  service/ZlmApiClient.h)
 
 add_library(easy_sva_gb28181_service STATIC ${GB28181_SERVICE_SOURCES})
 add_library(easySVA::GB28181Service ALIAS easy_sva_gb28181_service)
@@ -57,7 +59,8 @@ target_include_directories(easy_sva_gb28181_service
   PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
   PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../src>")
 target_link_libraries(easy_sva_gb28181_service
-  PUBLIC easySVA::GB28181Core)
+  PUBLIC easySVA::GB28181Core
+  PRIVATE ZLMediaKit::MediaKit)
 
 if(USE_SOLUTION_FOLDERS)
   set_property(TARGET easy_sva_gb28181_core PROPERTY FOLDER "gb28181")
@@ -110,6 +113,10 @@ if(ENABLE_TESTS)
   target_compile_options(test_gb28181_media_session PRIVATE ${COMPILE_OPTIONS_DEFAULT})
   target_link_libraries(test_gb28181_media_session PRIVATE easySVA::GB28181Service)
 
+  add_executable(test_gb28181_zlm_api tests/test_zlm_api.cpp)
+  target_compile_options(test_gb28181_zlm_api PRIVATE ${COMPILE_OPTIONS_DEFAULT})
+  target_link_libraries(test_gb28181_zlm_api PRIVATE easySVA::GB28181Service)
+
   if(USE_SOLUTION_FOLDERS)
     set_property(TARGET test_gb28181_sip_core PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_service_core PROPERTY FOLDER "gb28181/test")
@@ -117,5 +124,6 @@ if(ENABLE_TESTS)
     set_property(TARGET test_gb28181_device_messages PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_platform_commands PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_media_session PROPERTY FOLDER "gb28181/test")
+    set_property(TARGET test_gb28181_zlm_api PROPERTY FOLDER "gb28181/test")
   endif()
 endif()
