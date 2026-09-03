@@ -4,10 +4,12 @@
 
 #include "core/DigestAuth.h"
 #include "core/SipMessage.h"
+#include "core/SipStreamDecoder.h"
 
 using easy_sva::gb28181::DigestAuth;
 using easy_sva::gb28181::DigestCredentials;
 using easy_sva::gb28181::SipMessage;
+using easy_sva::gb28181::SipStreamDecoder;
 
 namespace {
 
@@ -151,6 +153,46 @@ void testSipDigestVerification() {
            "stale challenges are marked");
 }
 
+void testTcpStreamFraming() {
+    SipMessage first;
+    first.setRequestLine("OPTIONS", "sip:platform@example");
+    first.addHeader("Call-ID", "first");
+    SipMessage second;
+    second.setRequestLine("REGISTER", "sip:platform@example");
+    second.addHeader("Call-ID", "second");
+    const std::string firstWire = first.serialize();
+    const std::string secondWire = second.serialize();
+
+    SipStreamDecoder decoder(4096);
+    std::string error;
+    expect(decoder.append(firstWire.substr(0, 11), &error), "first TCP fragment is accepted");
+    SipMessage decoded;
+    expect(decoder.next(decoded, &error) == SipStreamDecoder::NeedMoreData,
+           "partial TCP request waits for more data");
+    expect(decoder.append(firstWire.substr(11) + secondWire, &error),
+           "coalesced TCP remainder is accepted");
+    expect(decoder.next(decoded, &error) == SipStreamDecoder::MessageReady,
+           "first coalesced request is decoded");
+    expect(decoded.method() == "OPTIONS" && decoded.header("Call-ID") == "first",
+           "first TCP request stays intact");
+    expect(decoder.next(decoded, &error) == SipStreamDecoder::MessageReady,
+           "second coalesced request is decoded");
+    expect(decoded.method() == "REGISTER" && decoded.header("Call-ID") == "second",
+           "second TCP request stays intact");
+    expect(decoder.next(decoded, &error) == SipStreamDecoder::NeedMoreData,
+           "decoder is empty after both requests");
+
+    SipStreamDecoder invalid(4096);
+    expect(invalid.append("OPTIONS sip:x SIP/2.0\r\nBroken\r\n\r\n", &error),
+           "malformed frame fits the buffer");
+    expect(invalid.next(decoded, &error) == SipStreamDecoder::InvalidMessage,
+           "malformed TCP message is reported as invalid");
+
+    SipStreamDecoder limited(16);
+    expect(!limited.append(std::string(17, 'x'), &error),
+           "configured stream-size limit is enforced before allocation growth");
+}
+
 } // namespace
 
 int main() {
@@ -159,6 +201,7 @@ int main() {
     testMalformedMessages();
     testDigestReferenceVector();
     testSipDigestVerification();
+    testTcpStreamFraming();
 
     if (failures != 0) {
         std::cerr << failures << " GB28181 SIP core test(s) failed" << std::endl;

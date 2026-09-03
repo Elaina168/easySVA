@@ -3,6 +3,8 @@ set(GB28181_CORE_SOURCES
   core/DigestAuth.h
   core/SipMessage.cpp
   core/SipMessage.h
+  core/SipStreamDecoder.cpp
+  core/SipStreamDecoder.h
   core/SipResponse.cpp
   core/SipResponse.h)
 
@@ -12,6 +14,8 @@ add_library(easySVA::GB28181Core ALIAS easy_sva_gb28181_core)
 set(GB28181_SERVICE_SOURCES
   service/GbSipConfig.cpp
   service/GbSipConfig.h
+  service/GbSipTransport.cpp
+  service/GbSipTransport.h
   service/SipRequestProcessor.cpp
   service/SipRequestProcessor.h)
 
@@ -35,6 +39,19 @@ if(USE_SOLUTION_FOLDERS)
   set_property(TARGET easy_sva_gb28181_core PROPERTY FOLDER "gb28181")
   set_property(TARGET easy_sva_gb28181_service PROPERTY FOLDER "gb28181")
 endif()
+
+add_executable(GbSipServer main.cpp)
+target_compile_options(GbSipServer
+  PRIVATE ${COMPILE_OPTIONS_DEFAULT})
+target_link_libraries(GbSipServer
+  PRIVATE easySVA::GB28181Service)
+
+if(USE_SOLUTION_FOLDERS)
+  set_property(TARGET GbSipServer PROPERTY FOLDER "gb28181")
+endif()
+
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/../conf/gb28181.ini"
+     DESTINATION ${EXECUTABLE_OUTPUT_PATH})
 
 if(ENABLE_TESTS)
   add_executable(test_gb28181_sip_core tests/test_sip_core.cpp)
