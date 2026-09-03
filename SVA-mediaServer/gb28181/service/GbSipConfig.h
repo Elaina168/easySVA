@@ -22,6 +22,7 @@ struct GbSipConfig {
     uint32_t defaultRegisterExpires;
     uint32_t minRegisterExpires;
     uint32_t maxRegisterExpires;
+    uint32_t heartbeatTimeoutSeconds;
     size_t maxMessageBytes;
 
     GbSipConfig();

@@ -11,7 +11,12 @@ set(GB28181_CORE_SOURCES
 add_library(easy_sva_gb28181_core STATIC ${GB28181_CORE_SOURCES})
 add_library(easySVA::GB28181Core ALIAS easy_sva_gb28181_core)
 
+set(GB28181_PUGIXML_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../src/Onvif/pugixml.cpp")
+
 set(GB28181_SERVICE_SOURCES
+  ${GB28181_PUGIXML_SOURCE}
+  service/DeviceCatalogStore.cpp
+  service/DeviceCatalogStore.h
   service/DigestNonceStore.cpp
   service/DigestNonceStore.h
   service/GbSipConfig.cpp
@@ -19,6 +24,8 @@ set(GB28181_SERVICE_SOURCES
   service/GbSipRequestProcessor.cpp
   service/GbSipRequestProcessor.h
   service/GbSipTransport.cpp
+  service/GbXmlParser.cpp
+  service/GbXmlParser.h
   service/GbSipTransport.h
   service/RegistrationStore.cpp
   service/RegistrationStore.h
@@ -37,7 +44,8 @@ target_link_libraries(easy_sva_gb28181_core
 target_compile_options(easy_sva_gb28181_service
   PRIVATE ${COMPILE_OPTIONS_DEFAULT})
 target_include_directories(easy_sva_gb28181_service
-  PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>")
+  PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
+  PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../src>")
 target_link_libraries(easy_sva_gb28181_service
   PUBLIC easySVA::GB28181Core)
 
@@ -78,9 +86,16 @@ if(ENABLE_TESTS)
   target_link_libraries(test_gb28181_registration
     PRIVATE easySVA::GB28181Service)
 
+  add_executable(test_gb28181_device_messages tests/test_device_messages.cpp)
+  target_compile_options(test_gb28181_device_messages
+    PRIVATE ${COMPILE_OPTIONS_DEFAULT})
+  target_link_libraries(test_gb28181_device_messages
+    PRIVATE easySVA::GB28181Service)
+
   if(USE_SOLUTION_FOLDERS)
     set_property(TARGET test_gb28181_sip_core PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_service_core PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_registration PROPERTY FOLDER "gb28181/test")
+    set_property(TARGET test_gb28181_device_messages PROPERTY FOLDER "gb28181/test")
   endif()
 endif()

@@ -111,6 +111,49 @@ def udp_exchange(host: str, port: int, timeout: float, request: bytes) -> str:
     return response.decode("ascii")
 
 
+def message_request(port: int, cseq: int, body: str) -> bytes:
+    device_id = "34020000001320000001"
+    realm = "3402000000"
+    encoded_body = body.encode("utf-8")
+    headers = (
+        f"MESSAGE sip:34020000002000000001@{realm} SIP/2.0\r\n"
+        f"Via: SIP/2.0/UDP 127.0.0.1:25060;branch=z9hG4bK-message-{cseq}\r\n"
+        f"From: <sip:{device_id}@{realm}>;tag=smoke-register\r\n"
+        f"To: <sip:34020000002000000001@{realm}>\r\n"
+        f"Call-ID: smoke-message-{port}\r\n"
+        f"CSeq: {cseq} MESSAGE\r\n"
+        "Content-Type: Application/MANSCDP+xml; charset=UTF-8\r\n"
+        f"Content-Length: {len(encoded_body)}\r\n\r\n"
+    ).encode("ascii")
+    return headers + encoded_body
+
+
+def smoke_device_messages(host: str, port: int, timeout: float) -> None:
+    device_id = "34020000001320000001"
+    keepalive = (
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<Notify><CmdType>Keepalive</CmdType><SN>1</SN>"
+        f"<DeviceID>{device_id}</DeviceID><Status>OK</Status></Notify>"
+    )
+    response = udp_exchange(host, port, timeout, message_request(port, 1, keepalive))
+    assert response.startswith("SIP/2.0 200 OK\r\n"), response
+
+    catalog = (
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<Response><CmdType>Catalog</CmdType><SN>2</SN>"
+        f"<DeviceID>{device_id}</DeviceID><SumNum>1</SumNum>"
+        "<DeviceList Num=\"1\"><Item>"
+        "<DeviceID>34020000001320000002</DeviceID><Name>入口摄像机</Name>"
+        "<Manufacturer>easySVA</Manufacturer><Model>Smoke-IPC</Model>"
+        f"<ParentID>{device_id}</ParentID><Parental>0</Parental>"
+        "<Status>ON</Status><Longitude>116.3</Longitude><Latitude>39.9</Latitude>"
+        "</Item></DeviceList></Response>"
+    )
+    response = udp_exchange(host, port, timeout, message_request(port, 2, catalog))
+    assert response.startswith("SIP/2.0 200 OK\r\n"), response
+    print("UDP MESSAGE Keepalive/Catalog -> 200/200")
+
+
 def smoke_registration(host: str, port: int, timeout: float, password: str) -> None:
     challenge = udp_exchange(host, port, timeout, register_request(port, 1, 3600))
     assert challenge.startswith("SIP/2.0 401 Unauthorized\r\n"), challenge
@@ -124,6 +167,8 @@ def smoke_registration(host: str, port: int, timeout: float, password: str) -> N
     )
     assert registered.startswith("SIP/2.0 200 OK\r\n"), registered
     assert "Expires: 3600\r\n" in registered, registered
+
+    smoke_device_messages(host, port, timeout)
 
     renewed = udp_exchange(
         host, port, timeout,

@@ -95,7 +95,9 @@ void testConfigParsing() {
         "nonce_ttl_seconds=120\n"
         "default_expires_seconds=600\n"
         "min_expires_seconds=60\n"
-        "max_expires_seconds=3600\n";
+        "max_expires_seconds=3600\n"
+        "[device]\n"
+        "heartbeat_timeout_seconds=75\n";
     GbSipConfig config;
     std::string error;
     expect(GbSipConfig::parse(valid, config, &error), "valid config parses: " + error);
@@ -109,6 +111,8 @@ void testConfigParsing() {
            "registration authentication is parsed");
     expect(config.nonceTtlSeconds == 120 && config.defaultRegisterExpires == 600,
            "registration lifetimes are parsed");
+    expect(config.heartbeatTimeoutSeconds == 75,
+           "heartbeat timeout is parsed");
 
     expect(!GbSipConfig::parse("[sip]\nserver_id=bad\n", config, &error),
            "non-standard platform IDs are rejected");
@@ -123,6 +127,8 @@ void testConfigParsing() {
     expect(!GbSipConfig::parse(
         "[registration]\nmin_expires_seconds=300\ndefault_expires_seconds=60\n", config, &error),
         "default registration expiry must stay within its configured bounds");
+    expect(!GbSipConfig::parse("[device]\nheartbeat_timeout_seconds=1\n", config, &error),
+           "unsafe heartbeat timeouts are rejected");
 }
 
 } // namespace
