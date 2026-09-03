@@ -43,6 +43,10 @@ public:
 
     bool create(const GbMediaSession &session,
                 std::string *error = nullptr);
+    bool assignRtpPort(const std::string &sessionId,
+                       uint16_t rtpPort,
+                       uint64_t now,
+                       std::string *error = nullptr);
     bool transition(const std::string &sessionId,
                     GbMediaSessionState expected,
                     GbMediaSessionState next,

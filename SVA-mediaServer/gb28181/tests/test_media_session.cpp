@@ -211,6 +211,32 @@ void testFailureLifecycle() {
            "failed session can be cleaned up");
 }
 
+void testPreparingReservation() {
+    MediaSessionStore store;
+    std::string error;
+    GbMediaSession session = sampleSession("session-reserved", "call-reserved");
+    session.rtpPort = 0;
+    expect(store.create(session, &error),
+           "preparing session reserves a channel before RTP allocation: " + error);
+    expect(!store.transition(session.sessionId, GbMediaPreparing, GbMediaInviting,
+                             1001, std::string(), &error) &&
+           error.find("before RTP port allocation") != std::string::npos,
+           "reserved session cannot invite without an allocated RTP port");
+    expect(!store.assignRtpPort(session.sessionId, 0, 1001, &error),
+           "zero cannot be assigned as an RTP port");
+    expect(store.assignRtpPort(session.sessionId, 30002, 1002, &error),
+           "allocated RTP port is attached while preparing: " + error);
+    expect(!store.assignRtpPort(session.sessionId, 30004, 1003, &error),
+           "RTP port cannot be reassigned");
+    GbMediaSession found;
+    expect(store.find(session.sessionId, found) && found.rtpPort == 30002 &&
+           found.updatedAt == 1002,
+           "reserved session exposes the allocated RTP port");
+    expect(store.transition(session.sessionId, GbMediaPreparing, GbMediaInviting,
+                            1003, std::string(), &error),
+           "allocated reservation can enter inviting state: " + error);
+}
+
 } // namespace
 
 int main() {
@@ -221,6 +247,7 @@ int main() {
     testSdpValidation();
     testMediaSessionLifecycle();
     testFailureLifecycle();
+    testPreparingReservation();
 
     if (failures != 0) {
         std::cerr << failures << " GB28181 media-session test(s) failed" << std::endl;
