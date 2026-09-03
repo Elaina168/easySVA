@@ -83,6 +83,8 @@ void testConfigParsing() {
         "[sip]\n"
         "server_id=34020000002000000099\n"
         "realm=3402000000\n"
+        "advertised_ip=203.0.113.10\n"
+        "transaction_timeout_seconds=8\n"
         "listen_ip=127.0.0.1\n"
         "port=15060\n"
         "udp=yes\n"
@@ -102,6 +104,8 @@ void testConfigParsing() {
     std::string error;
     expect(GbSipConfig::parse(valid, config, &error), "valid config parses: " + error);
     expect(config.serverId == "34020000002000000099", "server ID is parsed");
+    expect(config.advertisedIp == "203.0.113.10" && config.transactionTimeoutSeconds == 8,
+           "advertised SIP address and transaction timeout are parsed");
     expect(config.listenIp == "127.0.0.1" && config.sipPort == 15060,
            "listen endpoint is parsed");
     expect(config.enableUdp && !config.enableTcp, "transport switches are parsed");

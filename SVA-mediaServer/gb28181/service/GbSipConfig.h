@@ -11,6 +11,7 @@ namespace gb28181 {
 struct GbSipConfig {
     std::string serverId;
     std::string realm;
+    std::string advertisedIp;
     std::string listenIp;
     uint16_t sipPort;
     bool enableUdp;
@@ -23,6 +24,7 @@ struct GbSipConfig {
     uint32_t minRegisterExpires;
     uint32_t maxRegisterExpires;
     uint32_t heartbeatTimeoutSeconds;
+    uint32_t transactionTimeoutSeconds;
     size_t maxMessageBytes;
 
     GbSipConfig();

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -13,6 +14,8 @@ namespace easy_sva {
 namespace gb28181 {
 
 struct RegisteredDevice {
+    typedef std::function<bool(const std::string &)> Sender;
+
     std::string deviceId;
     std::string contact;
     std::string transport;
@@ -25,6 +28,7 @@ struct RegisteredDevice {
     uint64_t expiresAt;
     uint64_t lastHeartbeatAt;
     bool online;
+    Sender sender;
 
     RegisteredDevice();
 };
@@ -42,7 +46,8 @@ public:
                         uint64_t now,
                         const std::string &peerIp,
                         uint16_t peerPort,
-                        const std::string &transport);
+                        const std::string &transport,
+                        const RegisteredDevice::Sender &sender = RegisteredDevice::Sender());
     size_t markHeartbeatTimeouts(uint64_t now, uint32_t timeoutSeconds);
     size_t size() const;
 

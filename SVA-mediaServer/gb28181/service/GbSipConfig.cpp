@@ -95,6 +95,7 @@ void readString(const toolkit::mINI &ini, const std::string &key, std::string &v
 GbSipConfig::GbSipConfig()
     : serverId("34020000002000000001"),
       realm("3402000000"),
+      advertisedIp("127.0.0.1"),
       listenIp("0.0.0.0"),
       sipPort(5060),
       enableUdp(true),
@@ -107,6 +108,7 @@ GbSipConfig::GbSipConfig()
       minRegisterExpires(60),
       maxRegisterExpires(86400),
       heartbeatTimeoutSeconds(90),
+      transactionTimeoutSeconds(5),
       maxMessageBytes(1024 * 1024) {}
 
 bool GbSipConfig::parse(const std::string &text,
@@ -121,6 +123,7 @@ bool GbSipConfig::parse(const std::string &text,
     GbSipConfig parsed;
     readString(ini, "sip.server_id", parsed.serverId);
     readString(ini, "sip.realm", parsed.realm);
+    readString(ini, "sip.advertised_ip", parsed.advertisedIp);
     readString(ini, "sip.listen_ip", parsed.listenIp);
     readString(ini, "registration.device_password", parsed.devicePassword);
 
@@ -132,6 +135,7 @@ bool GbSipConfig::parse(const std::string &text,
     unsigned long long minExpires = parsed.minRegisterExpires;
     unsigned long long maxExpires = parsed.maxRegisterExpires;
     unsigned long long heartbeatTimeout = parsed.heartbeatTimeoutSeconds;
+    unsigned long long transactionTimeout = parsed.transactionTimeoutSeconds;
     if (!readUnsigned(ini, "sip.port", 1, 65535, port, error) ||
         !readUnsigned(ini, "sip.idle_timeout_seconds", 1, 86400, idleTimeout, error) ||
         !readUnsigned(ini, "sip.max_message_bytes", 1024, 16 * 1024 * 1024,
@@ -142,6 +146,8 @@ bool GbSipConfig::parse(const std::string &text,
         !readUnsigned(ini, "registration.max_expires_seconds", 1, 604800, maxExpires, error) ||
         !readUnsigned(ini, "device.heartbeat_timeout_seconds", 3, 86400,
                       heartbeatTimeout, error) ||
+        !readUnsigned(ini, "sip.transaction_timeout_seconds", 1, 60,
+                      transactionTimeout, error) ||
         !readBoolean(ini, "sip.udp", parsed.enableUdp, error) ||
         !readBoolean(ini, "sip.tcp", parsed.enableTcp, error) ||
         !readBoolean(ini, "registration.auth_required", parsed.authRequired, error)) {
@@ -156,6 +162,7 @@ bool GbSipConfig::parse(const std::string &text,
     parsed.minRegisterExpires = static_cast<uint32_t>(minExpires);
     parsed.maxRegisterExpires = static_cast<uint32_t>(maxExpires);
     parsed.heartbeatTimeoutSeconds = static_cast<uint32_t>(heartbeatTimeout);
+    parsed.transactionTimeoutSeconds = static_cast<uint32_t>(transactionTimeout);
     if (!parsed.validate(error)) {
         return false;
     }
@@ -187,6 +194,10 @@ bool GbSipConfig::validate(std::string *error) const {
     }
     if (realm.size() != 10 || !isDigits(realm)) {
         setError(error, "sip.realm must be a 10-digit GB28181 domain code");
+        return false;
+    }
+    if (advertisedIp.empty() || advertisedIp == "0.0.0.0" || advertisedIp == "::") {
+        setError(error, "sip.advertised_ip must be a reachable unicast address");
         return false;
     }
     if (listenIp.empty()) {
@@ -228,6 +239,10 @@ bool GbSipConfig::validate(std::string *error) const {
     }
     if (heartbeatTimeoutSeconds < 3 || heartbeatTimeoutSeconds > 86400) {
         setError(error, "device.heartbeat_timeout_seconds must be between 3 and 86400");
+        return false;
+    }
+    if (transactionTimeoutSeconds == 0 || transactionTimeoutSeconds > 60) {
+        setError(error, "sip.transaction_timeout_seconds must be between 1 and 60");
         return false;
     }
     return true;

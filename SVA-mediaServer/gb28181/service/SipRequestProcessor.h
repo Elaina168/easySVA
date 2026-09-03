@@ -2,6 +2,7 @@
 #define EASY_SVA_GB28181_SIP_REQUEST_PROCESSOR_H
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -11,9 +12,12 @@ namespace easy_sva {
 namespace gb28181 {
 
 struct SipPeer {
+    typedef std::function<bool(const std::string &)> Sender;
+
     std::string transport;
     std::string ip;
     uint16_t port;
+    Sender sender;
 
     SipPeer();
 };

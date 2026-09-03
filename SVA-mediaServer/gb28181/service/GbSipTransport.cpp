@@ -20,6 +20,11 @@ SipPeer makePeer(toolkit::Session &session, const std::string &transport) {
     peer.transport = transport;
     peer.ip = session.get_peer_ip();
     peer.port = session.get_peer_port();
+    const std::weak_ptr<toolkit::SocketHelper> weakSender = session.shared_from_this();
+    peer.sender = [weakSender](const std::string &wire) {
+        const std::shared_ptr<toolkit::SocketHelper> sender = weakSender.lock();
+        return sender && sender->send(wire) >= 0;
+    };
     return peer;
 }
 

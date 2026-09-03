@@ -17,6 +17,7 @@ namespace gb28181 {
 class GbSipRequestProcessor : public SipRequestProcessor {
 public:
     typedef std::function<uint64_t()> Clock;
+    typedef std::function<void(const SipMessage &, const SipPeer &)> ResponseHandler;
 
     explicit GbSipRequestProcessor(const GbSipConfig &config);
     GbSipRequestProcessor(const GbSipConfig &config,
@@ -35,6 +36,7 @@ public:
                  SipMessage &response) override;
 
     void sweep();
+    void setResponseHandler(const ResponseHandler &handler);
     const RegistrationStore::Ptr &registrations() const;
     const DigestNonceStore::Ptr &nonces() const;
     const DeviceCatalogStore::Ptr &catalogs() const;
@@ -56,6 +58,7 @@ private:
     DigestNonceStore::Ptr _nonces;
     DeviceCatalogStore::Ptr _catalogs;
     Clock _clock;
+    ResponseHandler _response_handler;
     BasicSipRequestProcessor _fallback;
 };
 
