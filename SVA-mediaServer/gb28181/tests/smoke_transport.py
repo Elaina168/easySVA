@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Send the same SIP OPTIONS request over UDP and TCP and verify both replies."""
+"""Exercise SIP transports and the authenticated GB28181 registration flow."""
 
 import argparse
+import hashlib
+import re
 import socket
 import subprocess
 import time
@@ -60,6 +62,85 @@ def smoke_tcp(host: str, port: int, timeout: float) -> None:
     print("TCP OPTIONS -> 200 OK")
 
 
+def md5_hex(value: str) -> str:
+    return hashlib.md5(value.encode("ascii")).hexdigest()
+
+
+def register_request(port: int, cseq: int, expires: int, authorization: str = "") -> bytes:
+    device_id = "34020000001320000001"
+    realm = "3402000000"
+    uri = f"sip:34020000002000000001@{realm}"
+    lines = [
+        f"REGISTER {uri} SIP/2.0",
+        f"Via: SIP/2.0/UDP 127.0.0.1:25060;branch=z9hG4bK-register-{cseq}",
+        f"From: <sip:{device_id}@{realm}>;tag=smoke-register",
+        f"To: <sip:{device_id}@{realm}>",
+        f"Call-ID: smoke-register-{port}",
+        f"CSeq: {cseq} REGISTER",
+        f"Contact: <sip:{device_id}@127.0.0.1:25060>",
+        "User-Agent: easySVA-smoke-device/1.0",
+        f"Expires: {expires}",
+    ]
+    if authorization:
+        lines.append(f"Authorization: {authorization}")
+    lines.extend(["Content-Length: 0", "", ""])
+    return "\r\n".join(lines).encode("ascii")
+
+
+def digest_authorization(password: str, nonce: str, cseq: int) -> str:
+    username = "34020000001320000001"
+    realm = "3402000000"
+    uri = f"sip:34020000002000000001@{realm}"
+    nc = f"{cseq:08x}"
+    cnonce = "easy-sva-smoke"
+    ha1 = md5_hex(f"{username}:{realm}:{password}")
+    ha2 = md5_hex(f"REGISTER:{uri}")
+    response = md5_hex(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}")
+    return (
+        f'Digest username="{username}", realm="{realm}", nonce="{nonce}", '
+        f'uri="{uri}", response="{response}", algorithm=MD5, '
+        f'qop=auth, nc={nc}, cnonce="{cnonce}"'
+    )
+
+
+def udp_exchange(host: str, port: int, timeout: float, request: bytes) -> str:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+        client.settimeout(timeout)
+        client.sendto(request, (host, port))
+        response, _ = client.recvfrom(65535)
+    return response.decode("ascii")
+
+
+def smoke_registration(host: str, port: int, timeout: float, password: str) -> None:
+    challenge = udp_exchange(host, port, timeout, register_request(port, 1, 3600))
+    assert challenge.startswith("SIP/2.0 401 Unauthorized\r\n"), challenge
+    match = re.search(r'nonce="([^"]+)"', challenge)
+    assert match, challenge
+    nonce = match.group(1)
+
+    registered = udp_exchange(
+        host, port, timeout,
+        register_request(port, 2, 3600, digest_authorization(password, nonce, 2)),
+    )
+    assert registered.startswith("SIP/2.0 200 OK\r\n"), registered
+    assert "Expires: 3600\r\n" in registered, registered
+
+    renewed = udp_exchange(
+        host, port, timeout,
+        register_request(port, 3, 300, digest_authorization(password, nonce, 3)),
+    )
+    assert renewed.startswith("SIP/2.0 200 OK\r\n"), renewed
+    assert "Expires: 300\r\n" in renewed, renewed
+
+    logged_out = udp_exchange(
+        host, port, timeout,
+        register_request(port, 4, 0, digest_authorization(password, nonce, 4)),
+    )
+    assert logged_out.startswith("SIP/2.0 200 OK\r\n"), logged_out
+    assert "Expires: 0\r\n" in logged_out, logged_out
+    print("UDP REGISTER challenge/auth/renew/logout -> 401/200/200/200")
+
+
 def wait_until_listening(host: str, port: int, timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -71,9 +152,10 @@ def wait_until_listening(host: str, port: int, timeout: float) -> None:
     raise TimeoutError(f"GbSipServer did not listen on {host}:{port}")
 
 
-def run_smoke(host: str, port: int, timeout: float) -> None:
+def run_smoke(host: str, port: int, timeout: float, password: str) -> None:
     smoke_udp(host, port, timeout)
     smoke_tcp(host, port, timeout)
+    smoke_registration(host, port, timeout, password)
     print("GB28181 SIP UDP/TCP transport smoke passed")
 
 
@@ -83,7 +165,7 @@ def run_managed_server(args: argparse.Namespace) -> None:
     process = subprocess.Popen([args.server, "--config", args.config])
     try:
         wait_until_listening(args.host, args.port, args.timeout)
-        run_smoke(args.host, args.port, args.timeout)
+        run_smoke(args.host, args.port, args.timeout, args.password)
     finally:
         if process.poll() is None:
             process.terminate()
@@ -105,12 +187,13 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=3.0)
     parser.add_argument("--server", help="GbSipServer executable to manage during the smoke test")
     parser.add_argument("--config", help="configuration path for a managed GbSipServer")
+    parser.add_argument("--password", default="12345678", help="demo device Digest password")
     args = parser.parse_args()
 
     if args.server:
         run_managed_server(args)
     else:
-        run_smoke(args.host, args.port, args.timeout)
+        run_smoke(args.host, args.port, args.timeout, args.password)
 
 
 if __name__ == "__main__":

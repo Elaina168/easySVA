@@ -88,7 +88,14 @@ void testConfigParsing() {
         "udp=yes\n"
         "tcp=off\n"
         "idle_timeout_seconds=90\n"
-        "max_message_bytes=65536\n";
+        "max_message_bytes=65536\n"
+        "[registration]\n"
+        "auth_required=true\n"
+        "device_password=test-secret\n"
+        "nonce_ttl_seconds=120\n"
+        "default_expires_seconds=600\n"
+        "min_expires_seconds=60\n"
+        "max_expires_seconds=3600\n";
     GbSipConfig config;
     std::string error;
     expect(GbSipConfig::parse(valid, config, &error), "valid config parses: " + error);
@@ -98,6 +105,10 @@ void testConfigParsing() {
     expect(config.enableUdp && !config.enableTcp, "transport switches are parsed");
     expect(config.idleTimeoutSeconds == 90 && config.maxMessageBytes == 65536,
            "resource limits are parsed");
+    expect(config.authRequired && config.devicePassword == "test-secret",
+           "registration authentication is parsed");
+    expect(config.nonceTtlSeconds == 120 && config.defaultRegisterExpires == 600,
+           "registration lifetimes are parsed");
 
     expect(!GbSipConfig::parse("[sip]\nserver_id=bad\n", config, &error),
            "non-standard platform IDs are rejected");
@@ -107,6 +118,11 @@ void testConfigParsing() {
            "out-of-range SIP ports are rejected");
     expect(!GbSipConfig::parse("[sip]\nmax_message_bytes=10\n", config, &error),
            "unsafe message-size limits are rejected");
+    expect(!GbSipConfig::parse("[registration]\nauth_required=true\ndevice_password=\n", config, &error),
+           "empty password is rejected when Digest authentication is enabled");
+    expect(!GbSipConfig::parse(
+        "[registration]\nmin_expires_seconds=300\ndefault_expires_seconds=60\n", config, &error),
+        "default registration expiry must stay within its configured bounds");
 }
 
 } // namespace

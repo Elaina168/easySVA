@@ -16,6 +16,12 @@ struct GbSipConfig {
     bool enableUdp;
     bool enableTcp;
     uint32_t idleTimeoutSeconds;
+    bool authRequired;
+    std::string devicePassword;
+    uint32_t nonceTtlSeconds;
+    uint32_t defaultRegisterExpires;
+    uint32_t minRegisterExpires;
+    uint32_t maxRegisterExpires;
     size_t maxMessageBytes;
 
     GbSipConfig();
