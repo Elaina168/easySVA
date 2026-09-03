@@ -6,9 +6,12 @@
 
 ## 1. 在 Ubuntu 22.04/WSL2 中准备环境
 
-建议先用 Python 3.10 或 3.11。若主机已经使用 Ubuntu 24.04/Python 3.12，也可以先尝试；依赖安装发生兼容问题时再切换到 22.04 环境，不需要先降级整台系统。
+Ubuntu 24.04 自带的 Python 3.12 可以直接使用，不需要降级整台系统。新虚拟机先安装 Python、虚拟环境、FFmpeg 和 OpenCV 运行时：
 
 ```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip ffmpeg libgl1
+
 cd SVA-server/tools/sleep_pose_prototype
 python3 -m venv .venv
 source .venv/bin/activate
@@ -16,6 +19,8 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
+
+也可以在本目录直接执行 `bash scripts/setup_ubuntu.sh` 完成上述安装和测试。所有 Python 包都安装在 `.venv`，不会修改 Ubuntu 的系统 Python 环境。
 
 第一次运行时，Ultralytics 会下载 `yolo11n-pose.pt`。部署前需要确认 Ultralytics 的 AGPL-3.0 或企业授权是否符合项目的交付方式。
 
