@@ -12,6 +12,7 @@ import com.ruoyi.common.core.page.TableSupport;
 import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.system.mapper.SysDeptMapper;
 import com.ruoyi.system.mapper.SysUserMapper;
+import com.ruoyi.waring.domain.GbDeviceDTO;
 import com.ruoyi.waring.domain.HDevice;
 import com.ruoyi.waring.domain.ZlmServer;
 import com.ruoyi.waring.mapper.HDeviceMapper;
@@ -22,11 +23,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -218,9 +221,9 @@ public class HDeviceServiceImpl implements HDeviceService {
                 .queryParam("app", zlmApp)
                 .queryParam("stream", stream)
                 .queryParam("url", device.getDirect_source_url())
-                .queryParam("enable_mp4", 1)
-                .queryParam("auto_close", 0)
-                .queryParam("media_timeout_ms", DIRECT_PROXY_MEDIA_TIMEOUT_MS)
+            .queryParam("enable_mp4", 1)
+            .queryParam("auto_close", 0)
+            .queryParam("media_timeout_ms", DIRECT_PROXY_MEDIA_TIMEOUT_MS)
                 .queryParamIfPresent("secret", StringUtils.isNotBlank(zlmServer.getSecret())
                         ? java.util.Optional.of(zlmServer.getSecret())
                         : java.util.Optional.empty())
@@ -450,7 +453,9 @@ public class HDeviceServiceImpl implements HDeviceService {
 
         String startAddProxyUrl = buildDirectAddProxyUrl(existedDevice);
         String startPlayUrl = buildDirectPlayUrl(existedDevice);
-        if (isDirectDevice(existedDevice)) {
+        // GB28181 国标设备不走 RTSP DIRECT 代理流：其播放地址由 ZLM 国标推流直接提供（play_url）
+        boolean isGb28181Device = "gb28181".equalsIgnoreCase(existedDevice.getDevice_type());
+        if (isDirectDevice(existedDevice) && !isGb28181Device) {
             Map<String, Object> directLiveInfo = getDirectLiveUrl(apeId);
             boolean addProxyAlreadyExists = Boolean.TRUE.equals(directLiveInfo.get("addProxyAlreadyExists"));
             if (addProxyAlreadyExists) {
@@ -487,8 +492,12 @@ public class HDeviceServiceImpl implements HDeviceService {
             throw new ServiceException("设备不存在: " + apeId);
         }
 
+        // GB28181 国标设备的 play_url 由 ZLM 国标推流长期提供，停止监控时保留；
+        // 仅非 GB28181 的 RTSP DIRECT 代理设备在停止时删除代理流并清空临时代理地址与代理 key。
+        boolean isGb28181Device = "gb28181".equalsIgnoreCase(existedDevice.getDevice_type());
+
         boolean directProxyDeleted = false;
-        if (isDirectDevice(existedDevice) && StringUtils.isNotBlank(existedDevice.getZlm_proxy_key())) {
+        if (!isGb28181Device && isDirectDevice(existedDevice) && StringUtils.isNotBlank(existedDevice.getZlm_proxy_key())) {
             try {
                 directProxyDeleted = deleteDirectStreamProxy(existedDevice);
             } catch (Exception e) {
@@ -501,9 +510,11 @@ public class HDeviceServiceImpl implements HDeviceService {
             throw new ServiceException("停止监控失败: " + apeId);
         }
 
-        hDeviceMapper.updatePlayUrlByApeId(apeId, null);
-        if (directProxyDeleted) {
-            hDeviceMapper.updateZlmProxyKeyByApeId(apeId, null);
+        if (!isGb28181Device) {
+            hDeviceMapper.updatePlayUrlByApeId(apeId, null);
+            if (directProxyDeleted) {
+                hDeviceMapper.updateZlmProxyKeyByApeId(apeId, null);
+            }
         }
         return updated;
     }
@@ -722,5 +733,204 @@ public class HDeviceServiceImpl implements HDeviceService {
             return url;
         }
         return url.replaceAll("(?i)([?&](secret|token|access_token|auth|sign|signature)=)[^&]*", "$1***");
+    }
+
+
+    /**
+     * 同步 ZLMediaKit 中的 GB28181 国标设备到本地设备表（幂等）。
+     * 同一 gb_device_id 已存在则更新，不存在则新增。
+     *
+     * @return 本次处理的国标设备数量
+     */
+    @Override
+    public int syncGbDevices() {
+        ZlmServer zlmServer = zlmServerMapper.selectEnabledById(DEFAULT_SERVER_ID);
+        if (zlmServer == null) {
+            log.warn("[GB28181] 未找到启用的 ZLM 服务器，跳过国标设备同步");
+            return 0;
+        }
+        List<GbDeviceDTO> gbDevices = fetchGbDevicesFromZlm(zlmServer);
+        if (gbDevices == null) {
+            log.warn("[GB28181] 获取国标设备失败，跳过本次同步（不更新在线/离线状态）");
+            return 0;
+        }
+        int synced = 0;
+        for (GbDeviceDTO gb : gbDevices) {
+            if (StringUtils.isBlank(gb.getDeviceId())) {
+                continue;
+            }
+            HDevice exist = hDeviceMapper.selectByGbDeviceId(gb.getDeviceId());
+            if (exist == null) {
+                // 不存在 -> 新增
+                HDevice device = buildGbDevice(gb, zlmServer);
+                try {
+                    hDeviceMapper.insertDeviceCrud(device);
+                    synced++;
+                    log.info("[GB28181] 新增国标设备: {}", gb.getDeviceId());
+                } catch (DuplicateKeyException e) {
+                    // 唯一索引冲突：先按 gb_device_id 复查，确认是并发同步兜底场景
+                    HDevice duplicated = hDeviceMapper.selectByGbDeviceId(gb.getDeviceId());
+                    if (duplicated != null) {
+                        // 确认冲突来自 gb_device_id 唯一键（并发同步兜底）→ 按更新处理
+                        boolean changed = false;
+                        if (StringUtils.isNotBlank(device.getPlay_url())
+                                && !device.getPlay_url().equals(duplicated.getPlay_url())) {
+                            duplicated.setPlay_url(device.getPlay_url());
+                            changed = true;
+                        }
+                        if (StringUtils.isNotBlank(device.getIs_online())
+                                && !device.getIs_online().equals(duplicated.getIs_online())) {
+                            duplicated.setIs_online(device.getIs_online());
+                            changed = true;
+                        }
+                        if (changed) {
+                            hDeviceMapper.updateDevice(duplicated);
+                        }
+                        synced++;
+                        log.warn("[GB28181] 并发插入冲突(唯一索引兜底)，按更新处理: {}", gb.getDeviceId());
+                    } else {
+                        // 冲突并非 gb_device_id 唯一键（如 ape_id 映射冲突），视为真实插入失败，不吞异常
+                        log.error("[GB28181] 国标设备插入失败且未发现 gb_device_id 重复记录: {}, 原因: {}", gb.getDeviceId(), e.getMessage());
+                    }
+                }
+            } else {
+                // 存在 -> 更新（名称 / 在线状态 / 播放地址）
+                boolean changed = false;
+                if (StringUtils.isNotBlank(gb.getName()) && !gb.getName().equals(exist.getName())) {
+                    exist.setName(gb.getName());
+                    changed = true;
+                }
+                String online = normalizeGbStatus(gb.getStatus(), exist.getIs_online());
+                if (StringUtils.isNotBlank(online) && !online.equals(exist.getIs_online())) {
+                    exist.setIs_online(online);
+                    changed = true;
+                }
+                if (StringUtils.isNotBlank(gb.getPlayUrl()) && !gb.getPlayUrl().equals(exist.getPlay_url())) {
+                    exist.setPlay_url(gb.getPlayUrl());
+                    changed = true;
+                }
+                if (changed) {
+                    hDeviceMapper.updateDevice(exist);
+                }
+                synced++;
+            }
+        }
+        // 本轮未返回的本地国标设备统一置为离线（在线 -> 离线状态同步）
+        List<String> activeGbIds = new ArrayList<>();
+        for (GbDeviceDTO gb : gbDevices) {
+            if (StringUtils.isNotBlank(gb.getDeviceId())) {
+                activeGbIds.add(gb.getDeviceId());
+            }
+        }
+        int offlineUpdated = hDeviceMapper.updateGbDeviceOffline(activeGbIds);
+        if (offlineUpdated > 0) {
+            log.info("[GB28181] 国标设备离线状态同步完成，共更新 {} 台为离线", offlineUpdated);
+        }
+        log.info("[GB28181] 国标设备同步完成，共处理 {} 台", gbDevices.size());
+        return synced;
+    }
+
+    /**
+     * 从 ZLMediaKit 拉取 GB28181 国标设备列表（对接点）。
+     * <p>
+     * 当前 ZLMediaKit 的 GB28181(SIP) 接入由任务三（GB28181/ZLMediaKit 模块）负责，
+     * 本方法为通用默认实现：先探测 ZLM 可用性，再从 getAllSession 会话中识别国标设备。
+     * 待任务三提供实际调通的设备列表接口后，仅需调整本方法内的请求与字段映射。
+     */
+    private List<GbDeviceDTO> fetchGbDevicesFromZlm(ZlmServer zlmServer) {
+        List<GbDeviceDTO> devices = new ArrayList<>();
+        if (zlmServer == null || StringUtils.isBlank(zlmServer.getHost()) || zlmServer.getApi_port() == null) {
+            log.warn("[GB28181] ZLM 服务器配置缺失，跳过国标设备同步（保留原状态）");
+            return null;
+        }
+        String secret = StringUtils.isBlank(zlmServer.getSecret()) ? "" : zlmServer.getSecret();
+        try {
+            String url = UriComponentsBuilder
+                    .fromUriString("http://" + zlmServer.getHost() + ":" + zlmServer.getApi_port()
+                            + "/index/api/getAllSession")
+                    .queryParam("secret", secret)
+                    .build().toUriString();
+            ResponseEntity<String> resp = restTemplate.getForEntity(url, String.class);
+            if (resp.getBody() == null) {
+                log.warn("[GB28181] ZLM getAllSession 响应为空，跳过本次同步（保留原状态）");
+                return null;
+            }
+            JsonNode root = OBJECT_MAPPER.readTree(resp.getBody());
+            if (root.path("code").asInt() != 0) {
+                log.warn("[GB28181] ZLM getAllSession 返回异常: {}, 跳过本次同步（保留原状态）", root.path("msg").asText("unknown"));
+                return null;
+            }
+            JsonNode data = root.path("data");
+            if (!data.isArray()) {
+                log.warn("[GB28181] ZLM getAllSession 返回 data 非数组，跳过本次同步（保留原状态）");
+                return null;
+            }
+            for (JsonNode session : data) {
+                String app = session.path("app").asText("");
+                String schema = session.path("schema").asText("");
+                String key = session.path("key").asText("");
+                // GB28181 国标设备经 SIP 注册后推流，ZLM 以 RTP/TS 会话承载；此处为通用识别。
+                boolean isGb = "rtp".equalsIgnoreCase(schema)
+                        || app.toLowerCase().contains("gb")
+                        || app.toLowerCase().contains("28181")
+                        || key.toLowerCase().startsWith("340200");
+                if (isGb && StringUtils.isNotBlank(key)) {
+                    GbDeviceDTO dto = new GbDeviceDTO();
+                    dto.setDeviceId(key);
+                    dto.setName(key);
+                    dto.setPlatformId(key);
+                    dto.setStreamId(key);
+                    dto.setStatus("online");
+                    // 会话中携带播放地址（RTP/TS 会话一般含 play_url），用于前端预览；
+                    // 任务三接通真实国标设备后，若字段不同仅需调整此处映射。
+                    String playUrl = session.path("play_url").asText("");
+                    dto.setPlayUrl(StringUtils.isNotBlank(playUrl) ? playUrl : null);
+                    devices.add(dto);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[GB28181] 从 ZLM 获取国标设备失败: {}, 跳过本次同步（保留原状态）", e.getMessage());
+            return null;
+        }
+        return devices;
+    }
+
+    /**
+     * 规整国标设备在线状态：识别常见在线/离线取值；未知状态返回 fallback（更新时保留原状态、新增时默认离线）。
+     */
+    private String normalizeGbStatus(String status, String fallback) {
+        if (StringUtils.isBlank(status)) {
+            return fallback;
+        }
+        String s = status.trim().toLowerCase();
+        switch (s) {
+            case "online": case "1": case "true": case "registered": case "connected": case "up":
+                return "1";
+            case "offline": case "0": case "false": case "unregistered": case "disconnected": case "down":
+                return "0";
+            default:
+                return fallback;
+        }
+    }
+
+    /**
+     * 将 GB28181 设备 DTO 转换为本地设备实体。
+     */
+    private HDevice buildGbDevice(GbDeviceDTO gb, ZlmServer zlmServer) {
+        HDevice device = new HDevice();
+        device.setApe_id(StringUtils.isNotBlank(gb.getStreamId()) ? gb.getStreamId() : gb.getDeviceId());
+        device.setName(StringUtils.isNotBlank(gb.getName()) ? gb.getName() : gb.getDeviceId());
+        device.setDevice_type("gb28181");
+        device.setGb_device_id(gb.getDeviceId());
+        device.setGb_platform_id(gb.getPlatformId());
+        device.setStream_source_type("DIRECT");
+        device.setResource_type("gb28181");
+        device.setSub_type("gb28181");
+        device.setIs_online(normalizeGbStatus(gb.getStatus(), "0"));
+        device.setMonitor_status("STOPPED");
+        device.setPlay_url(gb.getPlayUrl());
+        device.setZlm_server_id(zlmServer.getId());
+        device.setSva_server_id(1L);
+        return device;
     }
 }
