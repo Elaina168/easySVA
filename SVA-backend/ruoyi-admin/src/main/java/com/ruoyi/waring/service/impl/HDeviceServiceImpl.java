@@ -52,6 +52,7 @@ public class HDeviceServiceImpl implements HDeviceService {
     private static final String MONITOR_STATUS_ERROR = "ERROR";
     private static final long DEFAULT_SERVER_ID = 1L;
     private static final String DEFAULT_ZLM_APP = "live";
+    private static final int DIRECT_PROXY_MEDIA_TIMEOUT_MS = 60000;
 
     @Autowired
     HDeviceMapper hDeviceMapper;
@@ -217,8 +218,9 @@ public class HDeviceServiceImpl implements HDeviceService {
                 .queryParam("app", zlmApp)
                 .queryParam("stream", stream)
                 .queryParam("url", device.getDirect_source_url())
-            .queryParam("enable_mp4", 1)
-            .queryParam("auto_close", 0)
+                .queryParam("enable_mp4", 1)
+                .queryParam("auto_close", 0)
+                .queryParam("media_timeout_ms", DIRECT_PROXY_MEDIA_TIMEOUT_MS)
                 .queryParamIfPresent("secret", StringUtils.isNotBlank(zlmServer.getSecret())
                         ? java.util.Optional.of(zlmServer.getSecret())
                         : java.util.Optional.empty())
@@ -257,7 +259,7 @@ public class HDeviceServiceImpl implements HDeviceService {
         Map<String, Object> result = new HashMap<>();
         result.put("apeId", apeId);
         result.put("stream", stream);
-        result.put("playUrl", "ws://" + zlmServer.getHost() + ":" + zlmServer.getMedia_http_port() + "/" + zlmApp + "/" + stream + ".live.flv");
+        result.put("playUrl", "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/" + zlmApp + "/" + stream + ".live.flv");
         result.put("zlmProxyKey", StringUtils.isBlank(zlmProxyKey) ? null : zlmProxyKey);
         result.put("addProxySuccess", addProxySuccess);
         result.put("addProxyAlreadyExists", addProxyAlreadyExists);
@@ -518,7 +520,7 @@ public class HDeviceServiceImpl implements HDeviceService {
         }
 
         String previewAddProxyUrl = buildDirectAddProxyUrl(device);
-        String previewPlayUrl = device.getPlay_url();
+        String previewPlayUrl = normalizeBrowserPlayUrl(device.getPlay_url());
         if (StringUtils.isBlank(previewPlayUrl)) {
             previewPlayUrl = buildDirectPlayUrl(device);
         }
@@ -601,6 +603,7 @@ public class HDeviceServiceImpl implements HDeviceService {
             .queryParam("url", device.getDirect_source_url())
             .queryParam("enable_mp4", 1)
             .queryParam("auto_close", 0)
+            .queryParam("media_timeout_ms", DIRECT_PROXY_MEDIA_TIMEOUT_MS)
             .queryParamIfPresent("secret", StringUtils.isNotBlank(zlmServer.getSecret())
                 ? java.util.Optional.of(zlmServer.getSecret())
                 : java.util.Optional.empty())
@@ -620,7 +623,24 @@ public class HDeviceServiceImpl implements HDeviceService {
 
         String zlmApp = StringUtils.isBlank(zlmServer.getApp()) ? DEFAULT_ZLM_APP : zlmServer.getApp().trim();
         String stream = sanitizeStreamName(device.getApe_id());
-        return "ws://" + zlmServer.getHost() + ":" + zlmServer.getMedia_http_port() + "/" + zlmApp + "/" + stream + ".live.flv";
+        return "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/" + zlmApp + "/" + stream + ".live.flv";
+    }
+
+    private String browserMediaHost(String host) {
+        String normalizedHost = host == null ? "" : host.trim();
+        if ("127.0.0.1".equals(normalizedHost) || "::1".equals(normalizedHost)) {
+            return "localhost";
+        }
+        return normalizedHost;
+    }
+
+    private String normalizeBrowserPlayUrl(String playUrl) {
+        if (StringUtils.isBlank(playUrl)) {
+            return playUrl;
+        }
+        return playUrl
+            .replace("://127.0.0.1:", "://localhost:")
+            .replace("://[::1]:", "://localhost:");
     }
 
     private ZlmServer resolveEnabledZlmServer(HDevice device) {
