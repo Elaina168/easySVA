@@ -64,10 +64,6 @@ bool MediaSessionStore::create(const GbMediaSession &session,
         setError(error, "GB28181 media session identifiers cannot be empty");
         return false;
     }
-    if (session.rtpPort == 0) {
-        setError(error, "GB28181 media session RTP port must be positive");
-        return false;
-    }
     uint32_t numericSsrc = 0;
     if (!GbSdp::parseSsrc(session.ssrc, numericSsrc, error)) {
         return false;
@@ -100,6 +96,36 @@ bool MediaSessionStore::create(const GbMediaSession &session,
     return true;
 }
 
+bool MediaSessionStore::assignRtpPort(const std::string &sessionId,
+                                      uint16_t rtpPort,
+                                      uint64_t now,
+                                      std::string *error) {
+    if (error) {
+        error->clear();
+    }
+    if (rtpPort == 0) {
+        setError(error, "GB28181 media session RTP port must be positive");
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    std::map<std::string, GbMediaSession>::iterator found = _sessions.find(sessionId);
+    if (found == _sessions.end()) {
+        setError(error, "GB28181 media session was not found");
+        return false;
+    }
+    if (found->second.state != GbMediaPreparing) {
+        setError(error, "RTP port can only be assigned while the media session is preparing");
+        return false;
+    }
+    if (found->second.rtpPort != 0) {
+        setError(error, "GB28181 media session already has an RTP port");
+        return false;
+    }
+    found->second.rtpPort = rtpPort;
+    found->second.updatedAt = now;
+    return true;
+}
+
 bool MediaSessionStore::transition(const std::string &sessionId,
                                    GbMediaSessionState expected,
                                    GbMediaSessionState next,
@@ -118,6 +144,11 @@ bool MediaSessionStore::transition(const std::string &sessionId,
     if (found->second.state != expected) {
         setError(error, std::string("GB28181 media session is ") +
             stateName(found->second.state) + ", expected " + stateName(expected));
+        return false;
+    }
+    if (expected == GbMediaPreparing && next == GbMediaInviting &&
+        found->second.rtpPort == 0) {
+        setError(error, "GB28181 media session cannot invite before RTP port allocation");
         return false;
     }
     if (!canTransition(expected, next)) {
