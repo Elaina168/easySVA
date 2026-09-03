@@ -86,7 +86,7 @@ python export_onnx.py \
   --output-dir models
 ```
 
-命令会生成固定输入尺寸、无内置 NMS 的 ONNX，以及用 ONNX Runtime 实际读取的 `models/model_io.json`。C++ 集成必须以这个文件中的真实节点名和维度为准，不能只依据常见输出形状猜测。完整约定见 `docs/IO_CONTRACT.md`。
+命令会生成固定输入尺寸、无内置 NMS 的 ONNX，以及用 ONNX Runtime 实际读取的 `models/model_io.json`。C++ 集成必须以这个文件中的真实节点名和维度为准，不能只依据常见输出形状猜测。完整约定见 `docs/IO_CONTRACT.md`，首轮视频与 ONNX 验证记录见 `docs/BASELINE_RESULTS.md`。
 
 ## 5. 阈值调优顺序
 
@@ -108,7 +108,7 @@ python export_onnx.py \
 - 按 `track_id` 保存时序状态，把本目录的特征和状态机逻辑逐项移植；
 - 用相同视频对比 Python 与 C++ 的人框、关键点、状态跳转和事件时间，允许的数值误差需要写入验收记录。
 
-目前尚未随仓库提供真实睡岗视频，因此本目录能验证程序结构和状态机逻辑，但不能宣称已达到业务精度。真实本地测试结果需要在目标机位样本到位后生成。
+首轮公开素材已完成程序结构、状态机和 ONNX 可执行性验证，结果见 `docs/BASELINE_RESULTS.md`。由于尚未使用目标机位采集并标注的数据，当前结果不能宣称已达到业务精度。
 
 ## 参考项目
 
