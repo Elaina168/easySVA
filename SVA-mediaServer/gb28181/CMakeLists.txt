@@ -12,10 +12,16 @@ add_library(easy_sva_gb28181_core STATIC ${GB28181_CORE_SOURCES})
 add_library(easySVA::GB28181Core ALIAS easy_sva_gb28181_core)
 
 set(GB28181_SERVICE_SOURCES
+  service/DigestNonceStore.cpp
+  service/DigestNonceStore.h
   service/GbSipConfig.cpp
   service/GbSipConfig.h
+  service/GbSipRequestProcessor.cpp
+  service/GbSipRequestProcessor.h
   service/GbSipTransport.cpp
   service/GbSipTransport.h
+  service/RegistrationStore.cpp
+  service/RegistrationStore.h
   service/SipRequestProcessor.cpp
   service/SipRequestProcessor.h)
 
@@ -66,8 +72,15 @@ if(ENABLE_TESTS)
   target_link_libraries(test_gb28181_service_core
     PRIVATE easySVA::GB28181Service)
 
+  add_executable(test_gb28181_registration tests/test_registration.cpp)
+  target_compile_options(test_gb28181_registration
+    PRIVATE ${COMPILE_OPTIONS_DEFAULT})
+  target_link_libraries(test_gb28181_registration
+    PRIVATE easySVA::GB28181Service)
+
   if(USE_SOLUTION_FOLDERS)
     set_property(TARGET test_gb28181_sip_core PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_service_core PROPERTY FOLDER "gb28181/test")
+    set_property(TARGET test_gb28181_registration PROPERTY FOLDER "gb28181/test")
   endif()
 endif()

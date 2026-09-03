@@ -10,11 +10,11 @@
 #include "Util/logger.h"
 #include "Util/util.h"
 #include "service/GbSipConfig.h"
+#include "service/GbSipRequestProcessor.h"
 #include "service/GbSipTransport.h"
-#include "service/SipRequestProcessor.h"
 
-using easy_sva::gb28181::BasicSipRequestProcessor;
 using easy_sva::gb28181::GbSipConfig;
+using easy_sva::gb28181::GbSipRequestProcessor;
 using easy_sva::gb28181::GbSipTransportServer;
 using toolkit::AsyncLogWriter;
 using toolkit::ConsoleChannel;
@@ -90,8 +90,7 @@ int main(int argc, char **argv) {
         Logger::Instance().setWriter(std::make_shared<AsyncLogWriter>());
         EventPollerPool::setPoolSize(1);
 
-        std::shared_ptr<BasicSipRequestProcessor> processor(
-            new BasicSipRequestProcessor(config.serverId));
+        std::shared_ptr<GbSipRequestProcessor> processor(new GbSipRequestProcessor(config));
         GbSipTransportServer server;
         server.start(config, processor);
 

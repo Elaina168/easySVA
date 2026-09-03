@@ -100,6 +100,12 @@ GbSipConfig::GbSipConfig()
       enableUdp(true),
       enableTcp(true),
       idleTimeoutSeconds(180),
+      authRequired(true),
+      devicePassword("12345678"),
+      nonceTtlSeconds(300),
+      defaultRegisterExpires(3600),
+      minRegisterExpires(60),
+      maxRegisterExpires(86400),
       maxMessageBytes(1024 * 1024) {}
 
 bool GbSipConfig::parse(const std::string &text,
@@ -115,22 +121,36 @@ bool GbSipConfig::parse(const std::string &text,
     readString(ini, "sip.server_id", parsed.serverId);
     readString(ini, "sip.realm", parsed.realm);
     readString(ini, "sip.listen_ip", parsed.listenIp);
+    readString(ini, "registration.device_password", parsed.devicePassword);
 
     unsigned long long port = parsed.sipPort;
     unsigned long long idleTimeout = parsed.idleTimeoutSeconds;
     unsigned long long maxMessageBytes = parsed.maxMessageBytes;
+    unsigned long long nonceTtl = parsed.nonceTtlSeconds;
+    unsigned long long defaultExpires = parsed.defaultRegisterExpires;
+    unsigned long long minExpires = parsed.minRegisterExpires;
+    unsigned long long maxExpires = parsed.maxRegisterExpires;
     if (!readUnsigned(ini, "sip.port", 1, 65535, port, error) ||
         !readUnsigned(ini, "sip.idle_timeout_seconds", 1, 86400, idleTimeout, error) ||
         !readUnsigned(ini, "sip.max_message_bytes", 1024, 16 * 1024 * 1024,
                       maxMessageBytes, error) ||
+        !readUnsigned(ini, "registration.nonce_ttl_seconds", 10, 3600, nonceTtl, error) ||
+        !readUnsigned(ini, "registration.default_expires_seconds", 1, 604800, defaultExpires, error) ||
+        !readUnsigned(ini, "registration.min_expires_seconds", 1, 86400, minExpires, error) ||
+        !readUnsigned(ini, "registration.max_expires_seconds", 1, 604800, maxExpires, error) ||
         !readBoolean(ini, "sip.udp", parsed.enableUdp, error) ||
-        !readBoolean(ini, "sip.tcp", parsed.enableTcp, error)) {
+        !readBoolean(ini, "sip.tcp", parsed.enableTcp, error) ||
+        !readBoolean(ini, "registration.auth_required", parsed.authRequired, error)) {
         return false;
     }
 
     parsed.sipPort = static_cast<uint16_t>(port);
     parsed.idleTimeoutSeconds = static_cast<uint32_t>(idleTimeout);
     parsed.maxMessageBytes = static_cast<size_t>(maxMessageBytes);
+    parsed.nonceTtlSeconds = static_cast<uint32_t>(nonceTtl);
+    parsed.defaultRegisterExpires = static_cast<uint32_t>(defaultExpires);
+    parsed.minRegisterExpires = static_cast<uint32_t>(minExpires);
+    parsed.maxRegisterExpires = static_cast<uint32_t>(maxExpires);
     if (!parsed.validate(error)) {
         return false;
     }
@@ -182,6 +202,23 @@ bool GbSipConfig::validate(std::string *error) const {
     }
     if (maxMessageBytes < 1024 || maxMessageBytes > 16 * 1024 * 1024) {
         setError(error, "sip.max_message_bytes must be between 1024 and 16777216");
+        return false;
+    }
+    if (authRequired && devicePassword.empty()) {
+        setError(error, "registration.device_password is required when authentication is enabled");
+        return false;
+    }
+    if (nonceTtlSeconds < 10 || nonceTtlSeconds > 3600) {
+        setError(error, "registration.nonce_ttl_seconds must be between 10 and 3600");
+        return false;
+    }
+    if (minRegisterExpires == 0 || maxRegisterExpires < minRegisterExpires) {
+        setError(error, "registration expiry bounds are invalid");
+        return false;
+    }
+    if (defaultRegisterExpires < minRegisterExpires ||
+        defaultRegisterExpires > maxRegisterExpires) {
+        setError(error, "registration.default_expires_seconds must be within the expiry bounds");
         return false;
     }
     return true;
