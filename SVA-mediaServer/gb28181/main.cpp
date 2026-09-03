@@ -96,8 +96,13 @@ int main(int argc, char **argv) {
 
         std::signal(SIGINT, handleSignal);
         std::signal(SIGTERM, handleSignal);
+        std::chrono::steady_clock::time_point nextSweep = std::chrono::steady_clock::now();
         while (!exitRequested) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (std::chrono::steady_clock::now() >= nextSweep) {
+                processor->sweep();
+                nextSweep = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+            }
         }
         server.stop();
     } catch (const std::exception &ex) {

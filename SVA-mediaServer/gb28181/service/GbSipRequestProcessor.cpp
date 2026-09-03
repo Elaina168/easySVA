@@ -7,6 +7,7 @@
 
 #include "core/DigestAuth.h"
 #include "core/SipResponse.h"
+#include "GbXmlParser.h"
 
 namespace easy_sva {
 namespace gb28181 {
@@ -86,6 +87,12 @@ bool requiredRegisterHeadersPresent(const SipMessage &request) {
            request.hasHeader("CSeq") && request.hasHeader("Contact");
 }
 
+bool requiredMessageHeadersPresent(const SipMessage &request) {
+    return request.hasHeader("Via") && request.hasHeader("From") &&
+           request.hasHeader("To") && request.hasHeader("Call-ID") &&
+           request.hasHeader("CSeq") && request.hasHeader("Content-Type");
+}
+
 SipMessage registerError(const SipMessage &request,
                          int status,
                          const std::string &reason,
@@ -99,6 +106,7 @@ GbSipRequestProcessor::GbSipRequestProcessor(const GbSipConfig &config)
     : _config(config),
       _registrations(new RegistrationStore()),
       _nonces(new DigestNonceStore(config.nonceTtlSeconds)),
+      _catalogs(new DeviceCatalogStore()),
       _clock(gbSipUnixSeconds),
       _fallback(config.serverId) {}
 
@@ -106,9 +114,18 @@ GbSipRequestProcessor::GbSipRequestProcessor(const GbSipConfig &config,
                                              const RegistrationStore::Ptr &registrations,
                                              const DigestNonceStore::Ptr &nonces,
                                              const Clock &clock)
+    : GbSipRequestProcessor(config, registrations, nonces,
+                            DeviceCatalogStore::Ptr(new DeviceCatalogStore()), clock) {}
+
+GbSipRequestProcessor::GbSipRequestProcessor(const GbSipConfig &config,
+                                             const RegistrationStore::Ptr &registrations,
+                                             const DigestNonceStore::Ptr &nonces,
+                                             const DeviceCatalogStore::Ptr &catalogs,
+                                             const Clock &clock)
     : _config(config),
       _registrations(registrations),
       _nonces(nonces),
+      _catalogs(catalogs),
       _clock(clock),
       _fallback(config.serverId) {
     if (!_registrations) {
@@ -117,18 +134,29 @@ GbSipRequestProcessor::GbSipRequestProcessor(const GbSipConfig &config,
     if (!_nonces) {
         _nonces.reset(new DigestNonceStore(config.nonceTtlSeconds));
     }
+    if (!_catalogs) {
+        _catalogs.reset(new DeviceCatalogStore());
+    }
     if (!_clock) {
         _clock = gbSipUnixSeconds;
     }
 }
 
+void GbSipRequestProcessor::sweep() {
+    const uint64_t now = _clock();
+    _registrations->expire(now);
+    _registrations->markHeartbeatTimeouts(now, _config.heartbeatTimeoutSeconds);
+}
+
 bool GbSipRequestProcessor::process(const SipMessage &message,
                                     const SipPeer &peer,
                                     SipMessage &response) {
-    const uint64_t now = _clock();
-    _registrations->expire(now);
+    sweep();
     if (message.isRequest() && message.method() == "REGISTER") {
         return processRegister(message, peer, response);
+    }
+    if (message.isRequest() && message.method() == "MESSAGE") {
+        return processMessage(message, peer, response);
     }
     return _fallback.process(message, peer, response);
 }
@@ -139,6 +167,10 @@ const RegistrationStore::Ptr &GbSipRequestProcessor::registrations() const {
 
 const DigestNonceStore::Ptr &GbSipRequestProcessor::nonces() const {
     return _nonces;
+}
+
+const DeviceCatalogStore::Ptr &GbSipRequestProcessor::catalogs() const {
+    return _catalogs;
 }
 
 bool GbSipRequestProcessor::challenge(const SipMessage &request,
@@ -229,12 +261,101 @@ bool GbSipRequestProcessor::processRegister(const SipMessage &request,
         device.registeredAt = now;
         device.lastRegisterAt = now;
         device.expiresAt = now + expires;
+        device.lastHeartbeatAt = now;
+        device.online = true;
         _registrations->upsert(device);
+    }
+
+    if (expires == 0) {
+        _catalogs->removeDevice(deviceId);
     }
 
     response = SipResponse::fromRequest(request, 200, "OK", _config.serverId);
     response.addHeader("Contact", contact);
     response.addHeader("Expires", std::to_string(expires));
+    return true;
+}
+
+bool GbSipRequestProcessor::processMessage(const SipMessage &request,
+                                           const SipPeer &peer,
+                                           SipMessage &response) {
+    if (!requiredMessageHeadersPresent(request) || request.body().empty()) {
+        response = registerError(request, 400, "Bad Request", _config.serverId);
+        return true;
+    }
+    const std::string contentType = lowerAscii(request.header("Content-Type"));
+    if (contentType.find("application/manscdp+xml") != 0) {
+        response = registerError(request, 415, "Unsupported Media Type", _config.serverId);
+        return true;
+    }
+
+    GbXmlMessage xml;
+    std::string xmlError;
+    if (!GbXmlParser::parse(request.body(), xml, &xmlError)) {
+        response = registerError(request, 400, "Invalid MANSCDP XML", _config.serverId);
+        return true;
+    }
+    if (!isDeviceId(xml.deviceId) || sipUser(request.header("From")) != xml.deviceId) {
+        response = registerError(request, 403, "Forbidden", _config.serverId);
+        return true;
+    }
+
+    RegisteredDevice registered;
+    if (!_registrations->find(xml.deviceId, registered)) {
+        response = registerError(request, 403, "Device Not Registered", _config.serverId);
+        return true;
+    }
+
+    const std::string command = lowerAscii(xml.command);
+    const uint64_t now = _clock();
+    if (command == "keepalive") {
+        if (!xml.status.empty() && lowerAscii(xml.status) != "ok") {
+            response = registerError(request, 400, "Invalid Keepalive Status", _config.serverId);
+            return true;
+        }
+        _registrations->touchHeartbeat(xml.deviceId, now, peer.ip, peer.port, peer.transport);
+        response = SipResponse::fromRequest(request, 200, "OK", _config.serverId);
+        return true;
+    }
+
+    if (command == "catalog") {
+        std::vector<DeviceChannel> channels;
+        channels.reserve(xml.catalogItems.size());
+        for (std::vector<GbCatalogItem>::const_iterator it = xml.catalogItems.begin();
+             it != xml.catalogItems.end(); ++it) {
+            if (!isDeviceId(it->deviceId)) {
+                response = registerError(request, 400, "Invalid Catalog Device ID", _config.serverId);
+                return true;
+            }
+            DeviceChannel channel;
+            channel.deviceId = it->deviceId;
+            channel.name = it->name;
+            channel.manufacturer = it->manufacturer;
+            channel.model = it->model;
+            channel.owner = it->owner;
+            channel.civilCode = it->civilCode;
+            channel.address = it->address;
+            channel.parental = it->parental;
+            channel.parentId = it->parentId;
+            channel.safetyWay = it->safetyWay;
+            channel.registerWay = it->registerWay;
+            channel.secrecy = it->secrecy;
+            channel.status = it->status;
+            channel.longitude = it->longitude;
+            channel.latitude = it->latitude;
+            channels.push_back(channel);
+        }
+        if (xml.hasSumNum && xml.sumNum == channels.size()) {
+            _catalogs->replace(xml.deviceId, channels, now);
+        } else {
+            _catalogs->upsert(xml.deviceId, channels, now);
+        }
+        _registrations->touchHeartbeat(xml.deviceId, now, peer.ip, peer.port, peer.transport);
+        response = SipResponse::fromRequest(request, 200, "OK", _config.serverId);
+        return true;
+    }
+
+    response = registerError(request, 501, "MANSCDP Command Not Implemented", _config.serverId);
     return true;
 }
 

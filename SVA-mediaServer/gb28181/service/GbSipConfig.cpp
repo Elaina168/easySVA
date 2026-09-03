@@ -106,6 +106,7 @@ GbSipConfig::GbSipConfig()
       defaultRegisterExpires(3600),
       minRegisterExpires(60),
       maxRegisterExpires(86400),
+      heartbeatTimeoutSeconds(90),
       maxMessageBytes(1024 * 1024) {}
 
 bool GbSipConfig::parse(const std::string &text,
@@ -130,6 +131,7 @@ bool GbSipConfig::parse(const std::string &text,
     unsigned long long defaultExpires = parsed.defaultRegisterExpires;
     unsigned long long minExpires = parsed.minRegisterExpires;
     unsigned long long maxExpires = parsed.maxRegisterExpires;
+    unsigned long long heartbeatTimeout = parsed.heartbeatTimeoutSeconds;
     if (!readUnsigned(ini, "sip.port", 1, 65535, port, error) ||
         !readUnsigned(ini, "sip.idle_timeout_seconds", 1, 86400, idleTimeout, error) ||
         !readUnsigned(ini, "sip.max_message_bytes", 1024, 16 * 1024 * 1024,
@@ -138,6 +140,8 @@ bool GbSipConfig::parse(const std::string &text,
         !readUnsigned(ini, "registration.default_expires_seconds", 1, 604800, defaultExpires, error) ||
         !readUnsigned(ini, "registration.min_expires_seconds", 1, 86400, minExpires, error) ||
         !readUnsigned(ini, "registration.max_expires_seconds", 1, 604800, maxExpires, error) ||
+        !readUnsigned(ini, "device.heartbeat_timeout_seconds", 3, 86400,
+                      heartbeatTimeout, error) ||
         !readBoolean(ini, "sip.udp", parsed.enableUdp, error) ||
         !readBoolean(ini, "sip.tcp", parsed.enableTcp, error) ||
         !readBoolean(ini, "registration.auth_required", parsed.authRequired, error)) {
@@ -151,6 +155,7 @@ bool GbSipConfig::parse(const std::string &text,
     parsed.defaultRegisterExpires = static_cast<uint32_t>(defaultExpires);
     parsed.minRegisterExpires = static_cast<uint32_t>(minExpires);
     parsed.maxRegisterExpires = static_cast<uint32_t>(maxExpires);
+    parsed.heartbeatTimeoutSeconds = static_cast<uint32_t>(heartbeatTimeout);
     if (!parsed.validate(error)) {
         return false;
     }
@@ -219,6 +224,10 @@ bool GbSipConfig::validate(std::string *error) const {
     if (defaultRegisterExpires < minRegisterExpires ||
         defaultRegisterExpires > maxRegisterExpires) {
         setError(error, "registration.default_expires_seconds must be within the expiry bounds");
+        return false;
+    }
+    if (heartbeatTimeoutSeconds < 3 || heartbeatTimeoutSeconds > 86400) {
+        setError(error, "device.heartbeat_timeout_seconds must be between 3 and 86400");
         return false;
     }
     return true;

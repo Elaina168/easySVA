@@ -23,6 +23,8 @@ struct RegisteredDevice {
     uint64_t registeredAt;
     uint64_t lastRegisterAt;
     uint64_t expiresAt;
+    uint64_t lastHeartbeatAt;
+    bool online;
 
     RegisteredDevice();
 };
@@ -36,6 +38,12 @@ public:
     bool find(const std::string &deviceId, RegisteredDevice &device) const;
     std::vector<RegisteredDevice> list() const;
     size_t expire(uint64_t now);
+    bool touchHeartbeat(const std::string &deviceId,
+                        uint64_t now,
+                        const std::string &peerIp,
+                        uint16_t peerPort,
+                        const std::string &transport);
+    size_t markHeartbeatTimeouts(uint64_t now, uint32_t timeoutSeconds);
     size_t size() const;
 
 private:

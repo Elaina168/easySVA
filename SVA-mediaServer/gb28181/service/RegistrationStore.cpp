@@ -4,7 +4,8 @@ namespace easy_sva {
 namespace gb28181 {
 
 RegisteredDevice::RegisteredDevice()
-    : peerPort(0), registeredAt(0), lastRegisterAt(0), expiresAt(0) {}
+    : peerPort(0), registeredAt(0), lastRegisterAt(0), expiresAt(0),
+      lastHeartbeatAt(0), online(false) {}
 
 void RegistrationStore::upsert(const RegisteredDevice &device) {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -55,6 +56,40 @@ size_t RegistrationStore::expire(uint64_t now) {
         }
     }
     return removed;
+}
+
+bool RegistrationStore::touchHeartbeat(const std::string &deviceId,
+                                       uint64_t now,
+                                       const std::string &peerIp,
+                                       uint16_t peerPort,
+                                       const std::string &transport) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    std::map<std::string, RegisteredDevice>::iterator it = _devices.find(deviceId);
+    if (it == _devices.end()) {
+        return false;
+    }
+    it->second.lastHeartbeatAt = now;
+    it->second.online = true;
+    it->second.peerIp = peerIp;
+    it->second.peerPort = peerPort;
+    it->second.transport = transport;
+    return true;
+}
+
+size_t RegistrationStore::markHeartbeatTimeouts(uint64_t now, uint32_t timeoutSeconds) {
+    size_t markedOffline = 0;
+    std::lock_guard<std::mutex> lock(_mutex);
+    for (std::map<std::string, RegisteredDevice>::iterator it = _devices.begin();
+         it != _devices.end(); ++it) {
+        const uint64_t lastSeen = it->second.lastHeartbeatAt != 0
+            ? it->second.lastHeartbeatAt : it->second.lastRegisterAt;
+        if (it->second.online && now >= lastSeen &&
+            now - lastSeen >= timeoutSeconds) {
+            it->second.online = false;
+            ++markedOffline;
+        }
+    }
+    return markedOffline;
 }
 
 size_t RegistrationStore::size() const {
