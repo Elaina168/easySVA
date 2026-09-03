@@ -4,6 +4,8 @@
 
 当前主项目中的 `BehaviorEvaluator` 已有名为 `sleep` 的规则，但它主要依赖“低速 + 宽高比”，更接近躺倒检测。本目录不会改变现有服务行为，避免尚未用真实摄像头数据验证的阈值直接进入生产链路。
 
+如果 Windows 本机与 Ubuntu 虚拟机分工使用，请先阅读 `docs/WINDOWS_VM_WORKFLOW.md`；代码通过 Gitee 同步，视频和结果通过共享文件夹传输。
+
 ## 1. 在 Ubuntu 22.04/WSL2 中准备环境
 
 Ubuntu 24.04 自带的 Python 3.12 可以直接使用，不需要降级整台系统。新虚拟机先安装 Python、虚拟环境、FFmpeg 和 OpenCV 运行时：
