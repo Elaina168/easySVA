@@ -9,10 +9,12 @@
 #include "Poller/EventPoller.h"
 #include "Util/logger.h"
 #include "Util/util.h"
+#include "service/GbPlatformService.h"
 #include "service/GbSipConfig.h"
 #include "service/GbSipRequestProcessor.h"
 #include "service/GbSipTransport.h"
 
+using easy_sva::gb28181::GbPlatformService;
 using easy_sva::gb28181::GbSipConfig;
 using easy_sva::gb28181::GbSipRequestProcessor;
 using easy_sva::gb28181::GbSipTransportServer;
@@ -91,6 +93,12 @@ int main(int argc, char **argv) {
         EventPollerPool::setPoolSize(1);
 
         std::shared_ptr<GbSipRequestProcessor> processor(new GbSipRequestProcessor(config));
+        GbPlatformService::Ptr platform(new GbPlatformService(
+            config, processor->registrations(), processor->catalogs()));
+        processor->setResponseHandler([platform](const easy_sva::gb28181::SipMessage &response,
+                                                  const easy_sva::gb28181::SipPeer &) {
+            platform->handleResponse(response);
+        });
         GbSipTransportServer server;
         server.start(config, processor);
 
@@ -101,6 +109,7 @@ int main(int argc, char **argv) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             if (std::chrono::steady_clock::now() >= nextSweep) {
                 processor->sweep();
+                platform->sweep();
                 nextSweep = std::chrono::steady_clock::now() + std::chrono::seconds(1);
             }
         }

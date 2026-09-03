@@ -62,7 +62,8 @@ bool RegistrationStore::touchHeartbeat(const std::string &deviceId,
                                        uint64_t now,
                                        const std::string &peerIp,
                                        uint16_t peerPort,
-                                       const std::string &transport) {
+                                       const std::string &transport,
+                                       const RegisteredDevice::Sender &sender) {
     std::lock_guard<std::mutex> lock(_mutex);
     std::map<std::string, RegisteredDevice>::iterator it = _devices.find(deviceId);
     if (it == _devices.end()) {
@@ -73,6 +74,9 @@ bool RegistrationStore::touchHeartbeat(const std::string &deviceId,
     it->second.peerIp = peerIp;
     it->second.peerPort = peerPort;
     it->second.transport = transport;
+    if (sender) {
+        it->second.sender = sender;
+    }
     return true;
 }
 

@@ -19,6 +19,8 @@ set(GB28181_SERVICE_SOURCES
   service/DeviceCatalogStore.h
   service/DigestNonceStore.cpp
   service/DigestNonceStore.h
+  service/GbPlatformService.cpp
+  service/GbPlatformService.h
   service/GbSipConfig.cpp
   service/GbSipConfig.h
   service/GbSipRequestProcessor.cpp
@@ -29,6 +31,10 @@ set(GB28181_SERVICE_SOURCES
   service/GbSipTransport.h
   service/RegistrationStore.cpp
   service/RegistrationStore.h
+  service/SipClientTransaction.cpp
+  service/SipClientTransaction.h
+  service/SipRequestFactory.cpp
+  service/SipRequestFactory.h
   service/SipRequestProcessor.cpp
   service/SipRequestProcessor.h)
 
@@ -92,10 +98,15 @@ if(ENABLE_TESTS)
   target_link_libraries(test_gb28181_device_messages
     PRIVATE easySVA::GB28181Service)
 
+  add_executable(test_gb28181_platform_commands tests/test_platform_commands.cpp)
+  target_compile_options(test_gb28181_platform_commands PRIVATE ${COMPILE_OPTIONS_DEFAULT})
+  target_link_libraries(test_gb28181_platform_commands PRIVATE easySVA::GB28181Service)
+
   if(USE_SOLUTION_FOLDERS)
     set_property(TARGET test_gb28181_sip_core PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_service_core PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_registration PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_device_messages PROPERTY FOLDER "gb28181/test")
+    set_property(TARGET test_gb28181_platform_commands PROPERTY FOLDER "gb28181/test")
   endif()
 endif()

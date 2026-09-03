@@ -152,6 +152,12 @@ bool GbSipRequestProcessor::process(const SipMessage &message,
                                     const SipPeer &peer,
                                     SipMessage &response) {
     sweep();
+    if (!message.isRequest()) {
+        if (_response_handler) {
+            _response_handler(message, peer);
+        }
+        return false;
+    }
     if (message.isRequest() && message.method() == "REGISTER") {
         return processRegister(message, peer, response);
     }
@@ -159,6 +165,10 @@ bool GbSipRequestProcessor::process(const SipMessage &message,
         return processMessage(message, peer, response);
     }
     return _fallback.process(message, peer, response);
+}
+
+void GbSipRequestProcessor::setResponseHandler(const ResponseHandler &handler) {
+    _response_handler = handler;
 }
 
 const RegistrationStore::Ptr &GbSipRequestProcessor::registrations() const {
@@ -263,6 +273,7 @@ bool GbSipRequestProcessor::processRegister(const SipMessage &request,
         device.expiresAt = now + expires;
         device.lastHeartbeatAt = now;
         device.online = true;
+        device.sender = peer.sender;
         _registrations->upsert(device);
     }
 
@@ -313,7 +324,8 @@ bool GbSipRequestProcessor::processMessage(const SipMessage &request,
             response = registerError(request, 400, "Invalid Keepalive Status", _config.serverId);
             return true;
         }
-        _registrations->touchHeartbeat(xml.deviceId, now, peer.ip, peer.port, peer.transport);
+        _registrations->touchHeartbeat(
+            xml.deviceId, now, peer.ip, peer.port, peer.transport, peer.sender);
         response = SipResponse::fromRequest(request, 200, "OK", _config.serverId);
         return true;
     }
@@ -350,7 +362,8 @@ bool GbSipRequestProcessor::processMessage(const SipMessage &request,
         } else {
             _catalogs->upsert(xml.deviceId, channels, now);
         }
-        _registrations->touchHeartbeat(xml.deviceId, now, peer.ip, peer.port, peer.transport);
+        _registrations->touchHeartbeat(
+            xml.deviceId, now, peer.ip, peer.port, peer.transport, peer.sender);
         response = SipResponse::fromRequest(request, 200, "OK", _config.serverId);
         return true;
     }
