@@ -99,7 +99,14 @@ void testConfigParsing() {
         "min_expires_seconds=60\n"
         "max_expires_seconds=3600\n"
         "[device]\n"
-        "heartbeat_timeout_seconds=75\n";
+        "heartbeat_timeout_seconds=75\n"
+        "[media]\n"
+        "zlm_api_url=http://127.0.0.1:19992/\n"
+        "zlm_api_secret=test-api-secret\n"
+        "zlm_api_timeout_seconds=7\n"
+        "rtp_listen_ip=127.0.0.1\n"
+        "rtp_port=31000\n"
+        "rtp_tcp_mode=1\n";
     GbSipConfig config;
     std::string error;
     expect(GbSipConfig::parse(valid, config, &error), "valid config parses: " + error);
@@ -117,6 +124,12 @@ void testConfigParsing() {
            "registration lifetimes are parsed");
     expect(config.heartbeatTimeoutSeconds == 75,
            "heartbeat timeout is parsed");
+    expect(config.zlmApiUrl == "http://127.0.0.1:19992/" &&
+           config.zlmApiSecret == "test-api-secret" && config.zlmApiTimeoutSeconds == 7,
+           "ZLMediaKit API settings are parsed");
+    expect(config.rtpListenIp == "127.0.0.1" && config.rtpPort == 31000 &&
+           config.rtpTcpMode == 1,
+           "RTP receiver settings are parsed");
 
     expect(!GbSipConfig::parse("[sip]\nserver_id=bad\n", config, &error),
            "non-standard platform IDs are rejected");
@@ -133,6 +146,12 @@ void testConfigParsing() {
         "default registration expiry must stay within its configured bounds");
     expect(!GbSipConfig::parse("[device]\nheartbeat_timeout_seconds=1\n", config, &error),
            "unsafe heartbeat timeouts are rejected");
+    expect(!GbSipConfig::parse("[media]\nzlm_api_url=ftp://127.0.0.1\n", config, &error),
+           "unsupported ZLMediaKit API schemes are rejected");
+    expect(!GbSipConfig::parse("[media]\nzlm_api_timeout_seconds=0\n", config, &error),
+           "zero ZLMediaKit API timeout is rejected");
+    expect(!GbSipConfig::parse("[media]\nrtp_tcp_mode=3\n", config, &error),
+           "unknown RTP TCP modes are rejected");
 }
 
 } // namespace

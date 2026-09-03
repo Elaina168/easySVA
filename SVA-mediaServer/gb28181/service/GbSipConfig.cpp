@@ -109,7 +109,12 @@ GbSipConfig::GbSipConfig()
       maxRegisterExpires(86400),
       heartbeatTimeoutSeconds(90),
       transactionTimeoutSeconds(5),
-      maxMessageBytes(1024 * 1024) {}
+      maxMessageBytes(1024 * 1024),
+      zlmApiUrl("http://127.0.0.1:9992"),
+      zlmApiTimeoutSeconds(5),
+      rtpListenIp("0.0.0.0"),
+      rtpPort(0),
+      rtpTcpMode(0) {}
 
 bool GbSipConfig::parse(const std::string &text,
                         GbSipConfig &config,
@@ -126,6 +131,9 @@ bool GbSipConfig::parse(const std::string &text,
     readString(ini, "sip.advertised_ip", parsed.advertisedIp);
     readString(ini, "sip.listen_ip", parsed.listenIp);
     readString(ini, "registration.device_password", parsed.devicePassword);
+    readString(ini, "media.zlm_api_url", parsed.zlmApiUrl);
+    readString(ini, "media.zlm_api_secret", parsed.zlmApiSecret);
+    readString(ini, "media.rtp_listen_ip", parsed.rtpListenIp);
 
     unsigned long long port = parsed.sipPort;
     unsigned long long idleTimeout = parsed.idleTimeoutSeconds;
@@ -136,6 +144,9 @@ bool GbSipConfig::parse(const std::string &text,
     unsigned long long maxExpires = parsed.maxRegisterExpires;
     unsigned long long heartbeatTimeout = parsed.heartbeatTimeoutSeconds;
     unsigned long long transactionTimeout = parsed.transactionTimeoutSeconds;
+    unsigned long long zlmApiTimeout = parsed.zlmApiTimeoutSeconds;
+    unsigned long long rtpPort = parsed.rtpPort;
+    unsigned long long rtpTcpMode = parsed.rtpTcpMode;
     if (!readUnsigned(ini, "sip.port", 1, 65535, port, error) ||
         !readUnsigned(ini, "sip.idle_timeout_seconds", 1, 86400, idleTimeout, error) ||
         !readUnsigned(ini, "sip.max_message_bytes", 1024, 16 * 1024 * 1024,
@@ -148,6 +159,12 @@ bool GbSipConfig::parse(const std::string &text,
                       heartbeatTimeout, error) ||
         !readUnsigned(ini, "sip.transaction_timeout_seconds", 1, 60,
                       transactionTimeout, error) ||
+        !readUnsigned(ini, "media.zlm_api_timeout_seconds", 1, 60,
+                      zlmApiTimeout, error) ||
+        !readUnsigned(ini, "media.rtp_port", 0, 65535,
+                      rtpPort, error) ||
+        !readUnsigned(ini, "media.rtp_tcp_mode", 0, 2,
+                      rtpTcpMode, error) ||
         !readBoolean(ini, "sip.udp", parsed.enableUdp, error) ||
         !readBoolean(ini, "sip.tcp", parsed.enableTcp, error) ||
         !readBoolean(ini, "registration.auth_required", parsed.authRequired, error)) {
@@ -163,6 +180,9 @@ bool GbSipConfig::parse(const std::string &text,
     parsed.maxRegisterExpires = static_cast<uint32_t>(maxExpires);
     parsed.heartbeatTimeoutSeconds = static_cast<uint32_t>(heartbeatTimeout);
     parsed.transactionTimeoutSeconds = static_cast<uint32_t>(transactionTimeout);
+    parsed.zlmApiTimeoutSeconds = static_cast<uint32_t>(zlmApiTimeout);
+    parsed.rtpPort = static_cast<uint16_t>(rtpPort);
+    parsed.rtpTcpMode = static_cast<int>(rtpTcpMode);
     if (!parsed.validate(error)) {
         return false;
     }
@@ -184,7 +204,14 @@ bool GbSipConfig::load(const std::string &path,
         setError(error, "cannot read GB28181 config: " + path);
         return false;
     }
-    return parse(content.str(), config, error);
+    if (!parse(content.str(), config, error)) {
+        return false;
+    }
+    const char *environmentSecret = std::getenv("EASY_SVA_ZLM_API_SECRET");
+    if (environmentSecret && *environmentSecret) {
+        config.zlmApiSecret = environmentSecret;
+    }
+    return true;
 }
 
 bool GbSipConfig::validate(std::string *error) const {
@@ -243,6 +270,23 @@ bool GbSipConfig::validate(std::string *error) const {
     }
     if (transactionTimeoutSeconds == 0 || transactionTimeoutSeconds > 60) {
         setError(error, "sip.transaction_timeout_seconds must be between 1 and 60");
+        return false;
+    }
+    if (zlmApiUrl.compare(0, 7, "http://") != 0 &&
+        zlmApiUrl.compare(0, 8, "https://") != 0) {
+        setError(error, "media.zlm_api_url must use http:// or https://");
+        return false;
+    }
+    if (zlmApiTimeoutSeconds == 0 || zlmApiTimeoutSeconds > 60) {
+        setError(error, "media.zlm_api_timeout_seconds must be between 1 and 60");
+        return false;
+    }
+    if (rtpListenIp.empty()) {
+        setError(error, "media.rtp_listen_ip cannot be empty");
+        return false;
+    }
+    if (rtpTcpMode < 0 || rtpTcpMode > 2) {
+        setError(error, "media.rtp_tcp_mode must be 0, 1, or 2");
         return false;
     }
     return true;
