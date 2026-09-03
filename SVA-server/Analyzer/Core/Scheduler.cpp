@@ -315,6 +315,38 @@ namespace SVAAnalyzer
             }
         }
     }
+
+    void Scheduler::apiControlLiveOutput(const std::string &code,
+                                         bool videoEnabled,
+                                         bool liveEventEnabled,
+                                         float wsEventFps,
+                                         const std::string &pushStreamUrl,
+                                         int &result_code,
+                                         std::string &result_msg)
+    {
+        std::lock_guard<std::mutex> lock(mWorkerMapMtx);
+        auto it = mWorkerMap.find(code);
+        if (it == mWorkerMap.end() || !it->second)
+        {
+            result_code = 0;
+            result_msg = "the control does not exist";
+            return;
+        }
+
+        if (it->second->updateLiveOutput(code,
+                                         videoEnabled,
+                                         liveEventEnabled,
+                                         wsEventFps,
+                                         pushStreamUrl,
+                                         result_msg))
+        {
+            result_code = 1000;
+            return;
+        }
+
+        result_code = 0;
+    }
+
     void Scheduler::apiControlCancel(Control *control, int &result_code, std::string &result_msg)
     {
 

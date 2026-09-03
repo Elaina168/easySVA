@@ -112,6 +112,7 @@ void Server::start(void *arg)
                     evhttp_set_cb(http, "/api/controls", api_controls, scheduler);
                     evhttp_set_cb(http, "/api/control", api_control, scheduler);
                     evhttp_set_cb(http, "/api/control/add", api_control_add, scheduler);
+                    evhttp_set_cb(http, "/api/control/live-output", api_control_live_output, scheduler);
                     evhttp_set_cb(http, "/api/control/cancel", api_control_cancel, scheduler);
                     evhttp_set_cb(http, "/api/alarm/bind-media", api_alarm_bind_media, scheduler);
 
@@ -137,6 +138,7 @@ void api_index(struct evhttp_request *req, void *arg)
     result_urls["/api/controls"] = "get all control being analyzed";
     result_urls["/api/control"] = "get control being analyzed";
     result_urls["/api/control/add"] = "add control";
+    result_urls["/api/control/live-output"] = "update live video and event output";
     result_urls["/api/control/cancel"] = "cancel control";
     result_urls["/api/alarm/bind-media"] = "bind backend alarm metadata to generated media";
     result_urls["/api/largeModelCalcu"] = "largeModelCalcu";
@@ -893,6 +895,76 @@ void api_control_add(struct evhttp_request *req, void *arg)
     result["code"] = result_code;
 
     LOGI("\n \t request:%s \n \t response:%s", root.toStyledString().data(), result.toStyledString().data());
+
+    struct evbuffer *buff = evbuffer_new();
+    evbuffer_add_printf(buff, "%s", result.toStyledString().c_str());
+    evhttp_send_reply(req, HTTP_OK, nullptr, buff);
+    evbuffer_free(buff);
+}
+
+void api_control_live_output(struct evhttp_request *req, void *arg)
+{
+    Scheduler *scheduler = (Scheduler *)arg;
+    char buf[RECV_BUF_MAX_SIZE];
+    parse_post(req, buf);
+
+    Json::CharReaderBuilder builder;
+    const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    Json::Value root;
+    JSONCPP_STRING errs;
+
+    int result_code = 0;
+    std::string result_msg = "error";
+
+    if (!scheduler)
+    {
+        result_msg = "scheduler is unavailable";
+    }
+    else if (!reader->parse(buf, buf + std::strlen(buf), &root, &errs) || !errs.empty())
+    {
+        result_msg = "invalid request parameter";
+    }
+    else if (!root["controlCode"].isString() || root["controlCode"].asString().empty())
+    {
+        result_msg = "controlCode is required";
+    }
+    else if (!root["videoEnabled"].isBool() || !root["liveEventEnabled"].isBool())
+    {
+        result_msg = "videoEnabled and liveEventEnabled must be boolean";
+    }
+    else if (!root["wsEventFps"].isNumeric())
+    {
+        result_msg = "wsEventFps must be numeric";
+    }
+    else
+    {
+        const std::string controlCode = root["controlCode"].asString();
+        const bool videoEnabled = root["videoEnabled"].asBool();
+        const bool liveEventEnabled = root["liveEventEnabled"].asBool();
+        const float wsEventFps = root["wsEventFps"].asFloat();
+        const std::string pushStreamUrl = root["pushStreamUrl"].asString();
+
+        if (liveEventEnabled && (wsEventFps <= 0.0f || wsEventFps > 30.0f))
+        {
+            result_msg = "wsEventFps must be greater than 0 and no more than 30";
+        }
+        else
+        {
+            scheduler->apiControlLiveOutput(controlCode,
+                                            videoEnabled,
+                                            liveEventEnabled,
+                                            wsEventFps,
+                                            pushStreamUrl,
+                                            result_code,
+                                            result_msg);
+        }
+    }
+
+    Json::Value result;
+    result["msg"] = result_msg;
+    result["code"] = result_code;
+
+    LOGI("live-output request:%s response:%s", root.toStyledString().data(), result.toStyledString().data());
 
     struct evbuffer *buff = evbuffer_new();
     evbuffer_add_printf(buff, "%s", result.toStyledString().c_str());

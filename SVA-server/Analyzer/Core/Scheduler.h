@@ -372,6 +372,13 @@ namespace SVAAnalyzer
 		int apiControls(std::vector<Control *> &controls);
 		Control *apiControl(std::string &code);
 		void apiControlAdd(Control *control, int &result_code, std::string &result_msg);
+		void apiControlLiveOutput(const std::string &code,
+							  bool videoEnabled,
+							  bool liveEventEnabled,
+							  float wsEventFps,
+							  const std::string &pushStreamUrl,
+							  int &result_code,
+							  std::string &result_msg);
 		void apiControlCancel(Control *control, int &result_code, std::string &result_msg);
 		// ApiServer 对应的函数 end
 

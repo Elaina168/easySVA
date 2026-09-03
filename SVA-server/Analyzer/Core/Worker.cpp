@@ -289,6 +289,81 @@ namespace SVAAnalyzer
         return true;
     }
 
+    bool Worker::updateLiveOutput(const std::string &code,
+                                  bool videoEnabled,
+                                  bool liveEventEnabled,
+                                  float wsEventFps,
+                                  const std::string &pushStreamUrl,
+                                  std::string &msg)
+    {
+        std::lock_guard<std::mutex> lock(mControlRuntimesMtx);
+        auto it = mControlRuntimes.find(code);
+        if (it == mControlRuntimes.end() || !it->second || !it->second->control)
+        {
+            msg = "the control does not exist";
+            return false;
+        }
+
+        WorkerControlRuntime *runtime = it->second;
+        Control *control = runtime->control;
+
+        if (videoEnabled && !runtime->pushStream)
+        {
+            if (pushStreamUrl.empty())
+            {
+                msg = "pushStreamUrl is required when video output is enabled";
+                return false;
+            }
+
+            const bool previousPushStream = control->pushStream;
+            const std::string previousPushStreamUrl = control->pushStreamUrl;
+            control->pushStream = true;
+            control->pushStreamUrl = pushStreamUrl;
+
+            AvPushStream *newPushStream = new AvPushStream(this, control);
+            if (!newPushStream->connect())
+            {
+                delete newPushStream;
+                control->pushStream = previousPushStream;
+                control->pushStreamUrl = previousPushStreamUrl;
+                msg = "push stream connect error";
+                return false;
+            }
+
+            runtime->pushStream = newPushStream;
+            runtime->encodeThread = new std::thread(AvPushStream::encodeVideoThread, runtime->pushStream);
+        }
+        else if (!videoEnabled && runtime->pushStream)
+        {
+            control->pushStream = false;
+            runtime->pushStream->notifyStop();
+            if (runtime->encodeThread)
+            {
+                if (runtime->encodeThread->joinable())
+                {
+                    runtime->encodeThread->join();
+                }
+                delete runtime->encodeThread;
+                runtime->encodeThread = nullptr;
+            }
+            delete runtime->pushStream;
+            runtime->pushStream = nullptr;
+        }
+
+        control->pushStream = videoEnabled;
+        if (videoEnabled && !pushStreamUrl.empty())
+        {
+            control->pushStreamUrl = pushStreamUrl;
+        }
+        control->serverOverlayEnabled = videoEnabled;
+        control->wsOverlayEnabled = liveEventEnabled;
+        control->wsEventFps = liveEventEnabled ? wsEventFps : 0.0f;
+        control->renderMode = videoEnabled ? "server_overlay" : (liveEventEnabled ? "ws_overlay" : "detect_only");
+
+        msg = "live output updated";
+        return true;
+    }
+
     Control *Worker::getControl(const std::string &code)
     {
         std::lock_guard<std::mutex> lock(mControlRuntimesMtx);
