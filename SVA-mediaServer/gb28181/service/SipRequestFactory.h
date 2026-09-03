@@ -18,6 +18,25 @@ public:
                                    uint64_t serialNumber,
                                    uint64_t cseq,
                                    const std::string &token);
+
+    static SipMessage liveInvite(const GbSipConfig &config,
+                                 const RegisteredDevice &device,
+                                 const std::string &channelId,
+                                 const std::string &sdp,
+                                 const std::string &ssrc,
+                                 uint64_t cseq,
+                                 const std::string &token);
+
+    static SipMessage inviteAck(const GbSipConfig &config,
+                                const SipMessage &invite,
+                                const SipMessage &finalResponse,
+                                const std::string &token);
+
+    static SipMessage dialogBye(const GbSipConfig &config,
+                                const SipMessage &invite,
+                                const SipMessage &acceptedResponse,
+                                uint64_t cseq,
+                                const std::string &token);
 };
 
 } // namespace gb28181
