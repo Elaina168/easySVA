@@ -266,6 +266,18 @@ python3 ./gb28181/tests/smoke_device_simulator.py \
 GB28181 reproducible device end-to-end smoke passed
 ```
 
+需要连同真实 ZLMediaKit 的 PS 解复用、RTSP 输出和视频解码一起验收时，执行：
+
+```bash
+python3 ./gb28181/tests/smoke_real_zlm.py \
+  --server ./release/linux/Release/GbSipServer \
+  --media-server ./release/linux/Release/MediaServer \
+  --ffmpeg /usr/local/bin/ffmpeg \
+  --ffprobe /usr/local/bin/ffprobe
+```
+
+这个测试使用临时配置和动态端口，不读取或改写生产密钥。它会要求 ZLMediaKit 真正生成 RTSP 流，并通过 FFmpeg 解码 10 帧，而不只是检查 RTP UDP 包是否到达。
+
 ## 八、目前的边界
 
 当前生产路径完整支持 SIP over UDP/TCP，媒体接收支持 RTP over UDP 和 TCP 被动模式。配套模拟器目前只发送 UDP PS/RTP。`media.rtp_tcp_mode=2` 的 TCP 主动模式还需要接入 ZLMediaKit `connectRtpServer`，配置为 2 时服务会明确拒绝点播，不会假装成功。
