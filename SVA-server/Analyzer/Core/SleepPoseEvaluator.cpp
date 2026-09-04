@@ -337,9 +337,18 @@ namespace SVAAnalyzer
         features.headPitchProxyDeg = degreesFromRadians(
             std::atan2(shoulderCenterY - headY, shoulderWidth));
         features.headSideRatio = std::abs(headX - shoulderCenterX) / shoulderWidth;
-        features.shoulderAngleDeg = degreesFromRadians(
+        float shoulderAngleDeg = degreesFromRadians(
             std::atan2(rightShoulder.y - leftShoulder.y,
                        rightShoulder.x - leftShoulder.x));
+        if (shoulderAngleDeg > 90.0f)
+        {
+            shoulderAngleDeg -= 180.0f;
+        }
+        else if (shoulderAngleDeg < -90.0f)
+        {
+            shoulderAngleDeg += 180.0f;
+        }
+        features.shoulderAngleDeg = shoulderAngleDeg;
 
         float minimumArmDistance = std::numeric_limits<float>::max();
         bool hasArm = false;

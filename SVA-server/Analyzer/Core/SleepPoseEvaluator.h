@@ -33,7 +33,7 @@ namespace SVAAnalyzer
         float sleepPositiveRatio = 0.80f;
         float minimumValidRatio = 0.60f;
         int64_t recoveryMs = 2000;
-        float headHeightRatioMax = 0.45f;
+        float headHeightRatioMax = 0.48f;
         float headSideRatioMin = 0.30f;
         float headArmDistanceRatioMax = 0.75f;
         float torsoAngleDegMin = 25.0f;

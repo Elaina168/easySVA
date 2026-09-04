@@ -57,6 +57,7 @@ class PoseFeatures:
     shoulder_center_y: float | None = None
     shoulder_width: float | None = None
     head_height_ratio: float | None = None
+    head_pitch_proxy_deg: float | None = None
     head_side_ratio: float | None = None
     shoulder_angle_deg: float | None = None
     head_arm_distance_ratio: float | None = None
@@ -125,6 +126,7 @@ def extract_pose_features(
     head_x, head_y = _weighted_center(head_points)
 
     head_height_ratio = (shoulder_center_y - head_y) / shoulder_width
+    head_pitch_proxy_deg = degrees(atan2(shoulder_center_y - head_y, shoulder_width))
     head_side_ratio = abs(head_x - shoulder_center_x) / shoulder_width
     shoulder_angle_deg = degrees(
         atan2(
@@ -132,6 +134,10 @@ def extract_pose_features(
             right_shoulder.x - left_shoulder.x,
         )
     )
+    if shoulder_angle_deg > 90.0:
+        shoulder_angle_deg -= 180.0
+    elif shoulder_angle_deg < -90.0:
+        shoulder_angle_deg += 180.0
 
     arm_points = [keypoints[index] for index in ARM_INDICES if valid[index]]
     head_arm_distance_ratio: float | None = None
@@ -160,9 +166,9 @@ def extract_pose_features(
         shoulder_center_y=shoulder_center_y,
         shoulder_width=shoulder_width,
         head_height_ratio=head_height_ratio,
+        head_pitch_proxy_deg=head_pitch_proxy_deg,
         head_side_ratio=head_side_ratio,
         shoulder_angle_deg=shoulder_angle_deg,
         head_arm_distance_ratio=head_arm_distance_ratio,
         torso_angle_deg=torso_angle_deg,
     )
-

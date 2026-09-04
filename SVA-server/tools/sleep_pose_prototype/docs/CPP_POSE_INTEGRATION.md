@@ -128,7 +128,7 @@ on_yolo11n_pose
   "sleepPositiveRatio": 0.80,
   "minimumValidRatio": 0.60,
   "recoveryMs": 2000,
-  "headHeightRatioMax": 0.45,
+  "headHeightRatioMax": 0.48,
   "headSideRatioMin": 0.30,
   "headArmDistanceRatioMax": 0.75,
   "torsoAngleDegMin": 25.0,

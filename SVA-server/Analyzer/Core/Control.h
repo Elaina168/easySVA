@@ -107,7 +107,7 @@ namespace SVAAnalyzer
 		double sleepPositiveRatio = 0.80;
 		double minimumValidRatio = 0.60;
 		int64_t recoveryMs = 2000;
-		double headHeightRatioMax = 0.45;
+		double headHeightRatioMax = 0.48;
 		double headSideRatioMin = 0.30;
 		double headArmDistanceRatioMax = 0.75;
 		double torsoAngleDegMin = 25.0;

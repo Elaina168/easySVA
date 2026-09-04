@@ -63,11 +63,12 @@
 shoulder_center = (left_shoulder + right_shoulder) / 2
 head_center = confidence-weighted mean(nose, eyes, ears)
 head_height_ratio = (shoulder_center.y - head_center.y) / shoulder_width
+head_pitch_proxy_deg = atan2(shoulder_center.y - head_center.y, shoulder_width)
 head_side_ratio = abs(head_center.x - shoulder_center.x) / shoulder_width
 head_arm_distance_ratio = min(distance(head_center, visible elbows/wrists)) / shoulder_width
 ```
 
-肩宽归一化使阈值对人物远近更稳健。单帧候选要求“头部较低”并至少满足一项辅助证据：侧倾、头靠手臂、躯干前倾、肩倾或低运动量。
+`head_pitch_proxy_deg` 是图像平面内的二维俯仰代理角，不是真实三维头姿角。肩宽归一化使阈值对人物远近更稳健。单帧候选要求“头部较低”并至少满足一项辅助证据：侧倾、头靠手臂、躯干前倾、肩倾或低运动量。肩线角度按无方向直线归一化到 `[-90°, 90°]`，避免左右肩点在画面中的顺序让接近水平的肩线被误算成约 `180°` 倾斜。
 
 关键点无效时状态为未知观测：不触发睡岗，也不能用来证明人物已经恢复正常。轨迹消失超过 `tracker_max_missing_sec` 时清除该人的历史。
 

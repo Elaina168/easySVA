@@ -19,7 +19,7 @@ recovery_sec: 2.0
 
 # Per-frame posture evidence. These are starting points, not final thresholds.
 # Tune them from frame_features.csv using videos from the target camera.
-head_height_ratio_max: 0.45
+head_height_ratio_max: 0.48
 head_side_ratio_min: 0.30
 head_arm_distance_ratio_max: 0.75
 torso_angle_deg_min: 25.0
@@ -28,4 +28,3 @@ shoulder_tilt_deg_min: 15.0
 # Low motion is measured as head displacement / shoulder width over this window.
 motion_window_sec: 2.0
 head_motion_ratio_max: 0.15
-

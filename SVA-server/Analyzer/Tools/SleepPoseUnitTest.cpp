@@ -76,6 +76,15 @@ namespace
         expect(features.headSideRatio.has_value() && near(*features.headSideRatio, 0.40f),
                "head side offset is normalized by shoulder width");
 
+        keypoints[5] = {200.0f, 200.0f, 0.90f};
+        keypoints[6] = {100.0f, 210.0f, 0.90f};
+        const auto reversedShoulders = SVAAnalyzer::SleepPoseProcessor::extractFeatures(
+            keypoints,
+            testConfig());
+        expect(reversedShoulders.shoulderAngleDeg.has_value() &&
+                   near(*reversedShoulders.shoulderAngleDeg, -5.7106f),
+               "shoulder tilt is normalized to the undirected line angle");
+
         keypoints[6].confidence = 0.10f;
         const auto occluded = SVAAnalyzer::SleepPoseProcessor::extractFeatures(
             keypoints,

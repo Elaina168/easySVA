@@ -21,7 +21,7 @@ class PrototypeConfig:
     minimum_valid_ratio: float = 0.60
     recovery_sec: float = 2.0
 
-    head_height_ratio_max: float = 0.45
+    head_height_ratio_max: float = 0.48
     head_side_ratio_min: float = 0.30
     head_arm_distance_ratio_max: float = 0.75
     torso_angle_deg_min: float = 25.0
@@ -80,4 +80,3 @@ def load_config(path: str | Path | None = None) -> PrototypeConfig:
     if not isinstance(values, dict):
         raise ValueError("configuration root must be a YAML mapping")
     return PrototypeConfig.from_mapping(values)
-

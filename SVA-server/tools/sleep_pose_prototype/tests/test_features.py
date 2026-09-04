@@ -37,6 +37,7 @@ class FeatureExtractionTest(unittest.TestCase):
         self.assertTrue(result.valid)
         self.assertAlmostEqual(result.shoulder_width, 100.0)
         self.assertGreater(result.head_height_ratio, 0.9)
+        self.assertGreater(result.head_pitch_proxy_deg, 40.0)
         self.assertAlmostEqual(result.head_side_ratio, 0.0)
         self.assertLess(result.torso_angle_deg, 1.0)
 
@@ -58,7 +59,19 @@ class FeatureExtractionTest(unittest.TestCase):
 
         self.assertTrue(result.valid)
         self.assertLess(result.head_height_ratio, 0.45)
+        self.assertLess(result.head_pitch_proxy_deg, 25.0)
         self.assertLess(result.head_arm_distance_ratio, 0.2)
+
+    def test_reversed_shoulder_order_keeps_small_tilt(self) -> None:
+        points = pose()
+        set_point(points, "nose", 150, 180)
+        set_point(points, "left_shoulder", 200, 200)
+        set_point(points, "right_shoulder", 100, 210)
+
+        result = extract_pose_features(points, minimum_confidence=0.35)
+
+        self.assertTrue(result.valid)
+        self.assertAlmostEqual(result.shoulder_angle_deg, -5.710593, places=5)
 
     def test_missing_shoulder_makes_pose_unknown(self) -> None:
         points = pose()
