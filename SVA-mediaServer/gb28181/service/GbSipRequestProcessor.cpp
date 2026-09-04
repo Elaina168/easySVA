@@ -164,7 +164,14 @@ bool GbSipRequestProcessor::process(const SipMessage &message,
     if (message.isRequest() && message.method() == "MESSAGE") {
         return processMessage(message, peer, response);
     }
+    if (_request_handler && _request_handler(message, response)) {
+        return true;
+    }
     return _fallback.process(message, peer, response);
+}
+
+void GbSipRequestProcessor::setRequestHandler(const RequestHandler &handler) {
+    _request_handler = handler;
 }
 
 void GbSipRequestProcessor::setResponseHandler(const ResponseHandler &handler) {

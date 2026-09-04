@@ -38,6 +38,7 @@ public:
               const Completion &completion,
               std::string *error = nullptr);
     bool handleResponse(const SipMessage &response);
+    bool cancel(const SipMessage &request);
     size_t expire();
     size_t size() const;
 

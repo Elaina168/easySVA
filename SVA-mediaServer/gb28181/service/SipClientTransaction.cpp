@@ -129,6 +129,15 @@ bool SipClientTransactionStore::handleResponse(const SipMessage &response) {
     return true;
 }
 
+bool SipClientTransactionStore::cancel(const SipMessage &request) {
+    std::string key;
+    if (!transactionKey(request, key, nullptr)) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _entries.erase(key) != 0;
+}
+
 size_t SipClientTransactionStore::expire() {
     const uint64_t now = _clock();
     std::vector<Completion> callbacks;

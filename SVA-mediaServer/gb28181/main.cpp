@@ -99,6 +99,11 @@ int main(int argc, char **argv) {
             config, processor->registrations(), processor->catalogs()));
         GbLiveService::Ptr live(new GbLiveService(
             config, processor->registrations(), processor->catalogs()));
+        processor->setRequestHandler([live](
+                const easy_sva::gb28181::SipMessage &request,
+                easy_sva::gb28181::SipMessage &response) {
+            return live->handleRequest(request, response);
+        });
         processor->setResponseHandler([platform, live](
                 const easy_sva::gb28181::SipMessage &response,
                 const easy_sva::gb28181::SipPeer &) {

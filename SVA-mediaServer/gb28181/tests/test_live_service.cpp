@@ -159,6 +159,21 @@ SipMessage finalResponse(const SipMessage &request,
     return response;
 }
 
+SipMessage deviceBye(const SipMessage &invite,
+                     const SipMessage &accepted,
+                     uint64_t cseq = 20) {
+    SipMessage bye;
+    bye.setRequestLine("BYE", "sip:34020000002000000001@203.0.113.10:5060");
+    bye.addHeader("Via",
+        "SIP/2.0/UDP 192.0.2.20:5060;branch=z9hG4bK-device-bye");
+    bye.addHeader("From", accepted.header("To"));
+    bye.addHeader("To", invite.header("From"));
+    bye.addHeader("Call-ID", invite.header("Call-ID"));
+    bye.addHeader("CSeq", std::to_string(cseq) + " BYE");
+    bye.addHeader("Max-Forwards", "70");
+    return bye;
+}
+
 void testSuccessfulLifecycle() {
     Fixture fixture;
     fixture.addDevice();
@@ -287,6 +302,79 @@ void testInvalidAnswerIsTerminated() {
            "invalid SDP termination closes RTP and preserves the root cause");
 }
 
+void testDeviceInitiatedBye() {
+    Fixture fixture;
+    fixture.addDevice();
+    fixture.addChannel();
+    std::string error;
+    const std::string sessionId = fixture.live->startLive(deviceId, channelId, &error);
+    const SipMessage invite = fixture.lastRequest("INVITE");
+    GbMediaSession session;
+    fixture.live->findSession(sessionId, session);
+    const SipMessage accepted = finalResponse(
+        invite, 200, "OK", validAnswer(session.ssrc));
+    fixture.live->handleResponse(accepted);
+
+    const size_t outboundBeforeBye = fixture.outbound.size();
+    SipMessage response;
+    expect(fixture.live->handleRequest(deviceBye(invite, accepted), response) &&
+           response.statusCode() == 200,
+           "an in-dialog device BYE receives 200 OK");
+    fixture.live->findSession(sessionId, session);
+    expect(session.state == GbMediaStopped &&
+           fixture.zlmCallCount("closeRtpServer") == 1 &&
+           fixture.outbound.size() == outboundBeforeBye,
+           "device BYE stops the session and closes RTP without sending another BYE");
+
+    SipMessage duplicateResponse;
+    expect(fixture.live->handleRequest(
+               deviceBye(invite, accepted, 21), duplicateResponse) &&
+           duplicateResponse.statusCode() == 481,
+           "a BYE for an already ended dialog receives 481");
+
+    Fixture mismatched;
+    mismatched.addDevice();
+    mismatched.addChannel();
+    const std::string mismatchedId = mismatched.live->startLive(
+        deviceId, channelId, &error);
+    const SipMessage mismatchedInvite = mismatched.lastRequest("INVITE");
+    mismatched.live->findSession(mismatchedId, session);
+    const SipMessage mismatchedAccepted = finalResponse(
+        mismatchedInvite, 200, "OK", validAnswer(session.ssrc));
+    mismatched.live->handleResponse(mismatchedAccepted);
+    SipMessage wrongBye = deviceBye(mismatchedInvite, mismatchedAccepted);
+    wrongBye.setHeader("From",
+        "<sip:34020000001320000002@3402000000>;tag=wrong-device-tag");
+    expect(mismatched.live->handleRequest(wrongBye, response) &&
+           response.statusCode() == 481 &&
+           mismatched.zlmCallCount("closeRtpServer") == 0,
+           "a BYE with mismatched dialog tags is rejected without closing RTP");
+}
+
+void testCrossedByeCancelsLocalTransaction() {
+    Fixture fixture;
+    fixture.addDevice();
+    fixture.addChannel();
+    std::string error;
+    const std::string sessionId = fixture.live->startLive(deviceId, channelId, &error);
+    const SipMessage invite = fixture.lastRequest("INVITE");
+    GbMediaSession session;
+    fixture.live->findSession(sessionId, session);
+    const SipMessage accepted = finalResponse(
+        invite, 200, "OK", validAnswer(session.ssrc));
+    fixture.live->handleResponse(accepted);
+    fixture.live->stopLive(sessionId, &error);
+    expect(fixture.live->pendingTransactions() == 1,
+           "local BYE transaction is pending before crossed BYE");
+    SipMessage response;
+    fixture.live->handleRequest(deviceBye(invite, accepted), response);
+    fixture.live->findSession(sessionId, session);
+    expect(response.statusCode() == 200 && session.state == GbMediaStopped &&
+           fixture.live->pendingTransactions() == 0 &&
+           fixture.zlmCallCount("closeRtpServer") == 1,
+           "crossed device BYE cancels the local BYE and closes RTP exactly once");
+}
+
 void testTimeoutAndInputValidation() {
     Fixture fixture;
     fixture.addDevice();
@@ -323,6 +411,8 @@ int main() {
     testRtpAllocationFailure();
     testSignalingSendFailure();
     testInvalidAnswerIsTerminated();
+    testDeviceInitiatedBye();
+    testCrossedByeCancelsLocalTransaction();
     testTimeoutAndInputValidation();
 
     if (failures != 0) {
