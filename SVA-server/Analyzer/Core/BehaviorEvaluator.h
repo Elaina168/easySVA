@@ -62,7 +62,7 @@ namespace SVAAnalyzer
      * | dwell           | 在区域内停留超过阈值           | regionStates.inRegionDurationMs |
      * | low_speed       | 在区域内低速移动               | trail + speed     |
      * | loitering       | 在区域内小范围徘徊             | trail             |
-     * | sleep           | 静止 + 宽高比异常（躺卧）      | motionState + box size |
+     * | sleep           | Pose 时序状态；无 Pose 时兼容旧躺卧规则 | keypoints + trackId |
      * | direction_move  | 运动方向匹配指定角度           | trail + speed     |
      * | direction_reverse| 运动方向与指定角度相反        | trail + speed     |
      * 

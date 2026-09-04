@@ -1031,6 +1031,7 @@ namespace SVAAnalyzer
                                 obj.happen = src.happen;
                                 obj.hasPose = src.hasPose;
                                 obj.keypoints = src.keypoints;
+                                obj.sleepPose = src.sleepPose;
                                 obj.trackId = src.trackId;
                                 obj.firstSeenTimestampMs = src.firstSeenTimestampMs;
                                 obj.lastSeenTimestampMs = src.lastSeenTimestampMs;
@@ -1122,6 +1123,10 @@ namespace SVAAnalyzer
                                     char classScoreBuf[16];
                                     std::snprintf(classScoreBuf, sizeof(classScoreBuf), "%.2f", det.class_score);
                                     std::string title = det.class_name + " " + classScoreBuf;
+                                    if (det.sleepPose.evaluated)
+                                    {
+                                        title += " " + det.sleepPose.state;
+                                    }
 
                                     cv::rectangle(image, cv::Rect(x1, y1, x2 - x1, y2 - y1), boxColor, boxThickness, cv::LINE_AA);
                                     drawPoseOverlay(image, det);

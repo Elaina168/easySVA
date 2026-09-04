@@ -1,5 +1,7 @@
 #include "AlgorithmOnYoloPose.h"
+#include "SleepPoseEvaluator.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -57,6 +59,24 @@ namespace
                            cv::LINE_AA);
             }
         }
+
+        if (detect.sleepPose.evaluated)
+        {
+            const cv::Scalar color = detect.sleepPose.state == "SLEEP" ||
+                                             detect.sleepPose.state == "RECOVER"
+                                         ? cv::Scalar(0, 0, 255)
+                                         : cv::Scalar(255, 255, 0);
+            const std::string label = detect.sleepPose.state +
+                                      cv::format(" score=%.2f", detect.sleepPose.sleepScore);
+            cv::putText(image,
+                        label,
+                        cv::Point(detect.x1, std::max(24, detect.y1 - 8)),
+                        cv::FONT_HERSHEY_SIMPLEX,
+                        0.65,
+                        color,
+                        2,
+                        cv::LINE_AA);
+        }
     }
 }
 
@@ -101,6 +121,12 @@ int main(int argc, char **argv)
 
         int64_t frameCount = 0;
         int64_t detectionCount = 0;
+        int64_t sleepAlertCount = 0;
+        int64_t firstSleepAlertMs = -1;
+        SVAAnalyzer::SleepPoseConfig sleepConfig;
+        SVAAnalyzer::SleepPoseStreamContext sleepContext;
+        sleepContext.streamCode = sourcePath;
+        sleepContext.controlCode = "pose-smoke-test";
         const auto startedAt = std::chrono::steady_clock::now();
         cv::Mat frame;
         std::vector<SVAAnalyzer::DetectObject> detects;
@@ -110,6 +136,35 @@ int main(int argc, char **argv)
             {
                 std::fprintf(stderr, "Pose inference failed at frame %lld\n", static_cast<long long>(frameCount));
                 return 5;
+            }
+
+            // This standalone validator targets the current single-person material set.
+            // The production Analyzer assigns persistent IDs through TemporalProcessor.
+            std::vector<SVAAnalyzer::DetectObject *> detectPointers;
+            detectPointers.reserve(detects.size());
+            for (std::size_t index = 0; index < detects.size(); ++index)
+            {
+                detects[index].trackId = static_cast<int>(index + 1);
+                detectPointers.push_back(&detects[index]);
+            }
+            const double reportedTimestampMs = capture.get(cv::CAP_PROP_POS_MSEC);
+            const int64_t timestampMs = reportedTimestampMs > 0.0
+                                            ? static_cast<int64_t>(reportedTimestampMs)
+                                            : static_cast<int64_t>(static_cast<double>(frameCount) * 1000.0 / fps);
+            SVAAnalyzer::SleepPoseProcessor::updateStream(sleepContext,
+                                                          detectPointers,
+                                                          timestampMs,
+                                                          sleepConfig);
+            for (const auto &detect : detects)
+            {
+                if (detect.sleepPose.alert)
+                {
+                    if (firstSleepAlertMs < 0)
+                    {
+                        firstSleepAlertMs = timestampMs;
+                    }
+                    ++sleepAlertCount;
+                }
             }
             for (const auto &detect : detects)
             {
@@ -123,9 +178,11 @@ int main(int argc, char **argv)
         const double elapsedSeconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - startedAt).count();
         const double throughput = elapsedSeconds > 0.0 ? static_cast<double>(frameCount) / elapsedSeconds : 0.0;
-        std::printf("frames=%lld detections=%lld seconds=%.3f throughput_fps=%.3f output=%s\n",
+        std::printf("frames=%lld detections=%lld sleep_alerts=%lld first_sleep_alert_ms=%lld seconds=%.3f throughput_fps=%.3f output=%s\n",
                     static_cast<long long>(frameCount),
                     static_cast<long long>(detectionCount),
+                    static_cast<long long>(sleepAlertCount),
+                    static_cast<long long>(firstSleepAlertMs),
                     elapsedSeconds,
                     throughput,
                     outputPath.c_str());

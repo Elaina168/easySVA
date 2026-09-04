@@ -14,6 +14,7 @@
 #include "TrackMetadata.h"
 #include "TemporalContext.h"
 #include "PoseTypes.h"
+#include "SleepPoseEvaluator.h"
 
 namespace SVAAnalyzer
 {
@@ -47,6 +48,7 @@ namespace SVAAnalyzer
 		bool happen = false;
 		bool hasPose = false;
 		PoseKeypoints keypoints{};
+		SleepPoseAnalysis sleepPose{};
 		
 		// Temporal tracking fields (populated by TemporalProcessor)
 		int trackId = -1;
@@ -452,6 +454,7 @@ namespace SVAAnalyzer
 		// Temporal context per stream (teaching: worker architecture owns one context per stream)
 		std::mutex mStreamTemporalMtx;
 		std::unordered_map<std::string, StreamTemporalContext> mStreamTemporalContextMap;
+		std::unordered_map<std::string, SleepPoseStreamContext> mSleepPoseContextMap;
 		
 		// Behavior analysis runtime state
 		std::mutex mAggregateBehaviorStateMtx;

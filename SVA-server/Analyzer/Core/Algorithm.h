@@ -55,6 +55,7 @@ namespace SVAAnalyzer
         bool happen = false;
         bool hasPose = false;
         PoseKeypoints keypoints{};
+        SleepPoseAnalysis sleepPose{};
 
         // Temporal tracking (from TemporalProcessor)
         int trackId = -1;
