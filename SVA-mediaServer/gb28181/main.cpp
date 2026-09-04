@@ -9,12 +9,14 @@
 #include "Poller/EventPoller.h"
 #include "Util/logger.h"
 #include "Util/util.h"
+#include "service/GbControlApi.h"
 #include "service/GbLiveService.h"
 #include "service/GbPlatformService.h"
 #include "service/GbSipConfig.h"
 #include "service/GbSipRequestProcessor.h"
 #include "service/GbSipTransport.h"
 
+using easy_sva::gb28181::GbControlApi;
 using easy_sva::gb28181::GbLiveService;
 using easy_sva::gb28181::GbPlatformService;
 using easy_sva::gb28181::GbSipConfig;
@@ -111,8 +113,11 @@ int main(int argc, char **argv) {
                 live->handleResponse(response);
             }
         });
+        GbControlApi::Ptr control(new GbControlApi(
+            config, processor->registrations(), processor->catalogs(), live));
         GbSipTransportServer server;
         server.start(config, processor);
+        control->start();
 
         std::signal(SIGINT, handleSignal);
         std::signal(SIGTERM, handleSignal);
@@ -126,6 +131,7 @@ int main(int argc, char **argv) {
                 nextSweep = std::chrono::steady_clock::now() + std::chrono::seconds(1);
             }
         }
+        control->stop();
         server.stop();
     } catch (const std::exception &ex) {
         std::cerr << "GbSipServer failed: " << ex.what() << std::endl;

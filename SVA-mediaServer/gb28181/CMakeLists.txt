@@ -19,6 +19,8 @@ set(GB28181_SERVICE_SOURCES
   service/DeviceCatalogStore.h
   service/DigestNonceStore.cpp
   service/DigestNonceStore.h
+  service/GbControlApi.cpp
+  service/GbControlApi.h
   service/GbPlatformService.cpp
   service/GbPlatformService.h
   service/GbLiveService.cpp
@@ -63,6 +65,18 @@ target_include_directories(easy_sva_gb28181_service
 target_link_libraries(easy_sva_gb28181_service
   PUBLIC easySVA::GB28181Core
   PRIVATE ZLMediaKit::MediaKit)
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+  target_link_libraries(easy_sva_gb28181_service
+    PRIVATE "-Wl$<COMMA>--start-group$<COMMA>$<TARGET_FILE:ext-codec>$<COMMA>$<TARGET_FILE:zlmediakit>$<COMMA>$<TARGET_FILE:flv>$<COMMA>$<TARGET_FILE:mov>$<COMMA>$<TARGET_FILE:mpeg>$<COMMA>--end-group")
+  add_dependencies(easy_sva_gb28181_service
+    ext-codec
+    flv
+    mov
+    mpeg)
+else()
+  target_link_libraries(easy_sva_gb28181_service
+    PRIVATE ZLMediaKit::ext-codec)
+endif()
 
 if(USE_SOLUTION_FOLDERS)
   set_property(TARGET easy_sva_gb28181_core PROPERTY FOLDER "gb28181")
@@ -127,6 +141,12 @@ if(ENABLE_TESTS)
   target_compile_options(test_gb28181_zlm_api PRIVATE ${COMPILE_OPTIONS_DEFAULT})
   target_link_libraries(test_gb28181_zlm_api PRIVATE easySVA::GB28181Service)
 
+  add_executable(test_gb28181_control_api tests/test_control_api.cpp)
+  target_compile_options(test_gb28181_control_api PRIVATE ${COMPILE_OPTIONS_DEFAULT})
+  target_include_directories(test_gb28181_control_api
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../3rdpart/jsoncpp/include")
+  target_link_libraries(test_gb28181_control_api PRIVATE easySVA::GB28181Service)
+
   if(USE_SOLUTION_FOLDERS)
     set_property(TARGET test_gb28181_sip_core PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_service_core PROPERTY FOLDER "gb28181/test")
@@ -137,5 +157,6 @@ if(ENABLE_TESTS)
     set_property(TARGET test_gb28181_sip_dialog PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_live_service PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_zlm_api PROPERTY FOLDER "gb28181/test")
+    set_property(TARGET test_gb28181_control_api PROPERTY FOLDER "gb28181/test")
   endif()
 endif()

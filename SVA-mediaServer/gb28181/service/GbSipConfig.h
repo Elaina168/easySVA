@@ -26,6 +26,10 @@ struct GbSipConfig {
     uint32_t heartbeatTimeoutSeconds;
     uint32_t transactionTimeoutSeconds;
     size_t maxMessageBytes;
+    bool apiEnabled;
+    std::string apiListenIp;
+    uint16_t apiPort;
+    std::string apiSecret;
     std::string zlmApiUrl;
     std::string zlmApiSecret;
     uint32_t zlmApiTimeoutSeconds;

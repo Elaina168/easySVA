@@ -100,6 +100,11 @@ void testConfigParsing() {
         "max_expires_seconds=3600\n"
         "[device]\n"
         "heartbeat_timeout_seconds=75\n"
+        "[api]\n"
+        "enabled=true\n"
+        "listen_ip=0.0.0.0\n"
+        "port=18081\n"
+        "secret=api-secret\n"
         "[media]\n"
         "zlm_api_url=http://127.0.0.1:19992/\n"
         "zlm_api_secret=test-api-secret\n"
@@ -125,6 +130,9 @@ void testConfigParsing() {
            "registration lifetimes are parsed");
     expect(config.heartbeatTimeoutSeconds == 75,
            "heartbeat timeout is parsed");
+    expect(config.apiEnabled && config.apiListenIp == "0.0.0.0" &&
+           config.apiPort == 18081 && config.apiSecret == "api-secret",
+           "management API settings are parsed");
     expect(config.zlmApiUrl == "http://127.0.0.1:19992/" &&
            config.zlmApiSecret == "test-api-secret" && config.zlmApiTimeoutSeconds == 7,
            "ZLMediaKit API settings are parsed");
@@ -157,6 +165,9 @@ void testConfigParsing() {
            "unsupported ZLMediaKit API schemes are rejected");
     expect(!GbSipConfig::parse("[media]\nzlm_api_timeout_seconds=0\n", config, &error),
            "zero ZLMediaKit API timeout is rejected");
+    expect(!GbSipConfig::parse(
+        "[api]\nlisten_ip=0.0.0.0\nsecret=\n", config, &error),
+        "non-loopback management listeners require a secret");
     expect(!GbSipConfig::parse("[media]\nrtp_tcp_mode=3\n", config, &error),
            "unknown RTP TCP modes are rejected");
 }
