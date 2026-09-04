@@ -74,7 +74,15 @@ python3 tools/sleep_pose_prototype/scripts/analyze_cpp_features.py \
 告警产生后执行（字段以当前库为准）：
 
 ```sql
-SELECT w_id, alarm_type, alarm_name, picture_url, video_url, create_time
+SELECT w_id,
+       alarm_type,
+       alarm_type_name,
+       sva_behavior_type,
+       picture_url,
+       picture_absolute_url,
+       video_url,
+       sva_media_status,
+       alarm_time
 FROM h_waring
 WHERE alarm_type = 'SVA_SLEEP'
 ORDER BY w_id DESC
