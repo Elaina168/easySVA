@@ -853,65 +853,81 @@ public class HDeviceServiceImpl implements HDeviceService {
     }
 
     /**
-     * 从 ZLMediaKit 拉取 GB28181 国标设备列表（对接点）。
+     * 从任务三 GB28181 控制 API 拉取国标设备列表（正式对接，替换原 getAllSession 临时识别）。
      * <p>
-     * 当前 ZLMediaKit 的 GB28181(SIP) 接入由任务三（GB28181/ZLMediaKit 模块）负责，
-     * 本方法为通用默认实现：先探测 ZLM 可用性，再从 getAllSession 会话中识别国标设备。
-     * 待任务三提供实际调通的设备列表接口后，仅需调整本方法内的请求与字段映射。
+     * 设备列表：GET /gb28181/api/devices（注册设备，含 online 状态）
+     * 活跃会话：GET /gb28181/api/sessions（按 device_id 匹配 streaming 会话的 stream_id，用于生成 play_url）
+     * 控制 API 默认端口 18080（任务三 GbSipServer），与 ZLM 同机部署，host 复用 zlmServer.host。
      */
     private List<GbDeviceDTO> fetchGbDevicesFromZlm(ZlmServer zlmServer) {
         List<GbDeviceDTO> devices = new ArrayList<>();
-        if (zlmServer == null || StringUtils.isBlank(zlmServer.getHost()) || zlmServer.getApi_port() == null) {
+        if (zlmServer == null || StringUtils.isBlank(zlmServer.getHost())) {
             log.warn("[GB28181] ZLM 服务器配置缺失，跳过国标设备同步（保留原状态）");
             return null;
         }
-        String secret = StringUtils.isBlank(zlmServer.getSecret()) ? "" : zlmServer.getSecret();
+        final int gbApiPort = 18080;
+        final String gbPlatformId = "34020000002000000001";
+        String base = "http://" + zlmServer.getHost() + ":" + gbApiPort + "/gb28181/api";
         try {
-            String url = UriComponentsBuilder
-                    .fromUriString("http://" + zlmServer.getHost() + ":" + zlmServer.getApi_port()
-                            + "/index/api/getAllSession")
-                    .queryParam("secret", secret)
-                    .build().toUriString();
-            ResponseEntity<String> resp = restTemplate.getForEntity(url, String.class);
-            if (resp.getBody() == null) {
-                log.warn("[GB28181] ZLM getAllSession 响应为空，跳过本次同步（保留原状态）");
+            // 1. 拉取注册设备列表
+            ResponseEntity<String> devResp = restTemplate.getForEntity(base + "/devices", String.class);
+            if (devResp.getBody() == null) {
+                log.warn("[GB28181] GB 控制 API /devices 响应为空，跳过本次同步");
                 return null;
             }
-            JsonNode root = OBJECT_MAPPER.readTree(resp.getBody());
-            if (root.path("code").asInt() != 0) {
-                log.warn("[GB28181] ZLM getAllSession 返回异常: {}, 跳过本次同步（保留原状态）", root.path("msg").asText("unknown"));
+            JsonNode devRoot = OBJECT_MAPPER.readTree(devResp.getBody());
+            if (devRoot.path("code").asInt() != 0) {
+                log.warn("[GB28181] GB 控制 API /devices 返回异常: {}", devRoot.path("msg").asText("unknown"));
                 return null;
             }
-            JsonNode data = root.path("data");
-            if (!data.isArray()) {
-                log.warn("[GB28181] ZLM getAllSession 返回 data 非数组，跳过本次同步（保留原状态）");
+            JsonNode devData = devRoot.path("data");
+            if (!devData.isArray()) {
+                log.warn("[GB28181] GB 控制 API /devices data 非数组，跳过本次同步");
                 return null;
             }
-            for (JsonNode session : data) {
-                String app = session.path("app").asText("");
-                String schema = session.path("schema").asText("");
-                String key = session.path("key").asText("");
-                // GB28181 国标设备经 SIP 注册后推流，ZLM 以 RTP/TS 会话承载；此处为通用识别。
-                boolean isGb = "rtp".equalsIgnoreCase(schema)
-                        || app.toLowerCase().contains("gb")
-                        || app.toLowerCase().contains("28181")
-                        || key.toLowerCase().startsWith("340200");
-                if (isGb && StringUtils.isNotBlank(key)) {
-                    GbDeviceDTO dto = new GbDeviceDTO();
-                    dto.setDeviceId(key);
-                    dto.setName(key);
-                    dto.setPlatformId(key);
-                    dto.setStreamId(key);
-                    dto.setStatus("online");
-                    // 会话中携带播放地址（RTP/TS 会话一般含 play_url），用于前端预览；
-                    // 任务三接通真实国标设备后，若字段不同仅需调整此处映射。
-                    String playUrl = session.path("play_url").asText("");
-                    dto.setPlayUrl(StringUtils.isNotBlank(playUrl) ? playUrl : null);
-                    devices.add(dto);
+            // 2. 拉取活跃会话，构建 device_id -> stream_id 映射（仅 streaming 状态用于生成 play_url）
+            Map<String, String> deviceStreamMap = new HashMap<>();
+            try {
+                ResponseEntity<String> sessResp = restTemplate.getForEntity(base + "/sessions", String.class);
+                if (sessResp.getBody() != null) {
+                    JsonNode sessRoot = OBJECT_MAPPER.readTree(sessResp.getBody());
+                    if (sessRoot.path("code").asInt() == 0 && sessRoot.path("data").isArray()) {
+                        for (JsonNode sess : sessRoot.path("data")) {
+                            if ("streaming".equalsIgnoreCase(sess.path("state").asText(""))) {
+                                String did = sess.path("device_id").asText("");
+                                String sid = sess.path("stream_id").asText("");
+                                if (StringUtils.isNotBlank(did) && StringUtils.isNotBlank(sid)) {
+                                    deviceStreamMap.put(did, sid);
+                                }
+                            }
+                        }
+                    }
                 }
+            } catch (Exception e) {
+                log.warn("[GB28181] 获取活跃会话失败（不影响设备同步）: {}", e.getMessage());
+            }
+            // 3. 字段映射 + play_url 自动生成（HTTP-FLV，任务三当前关闭 HLS）
+            int httpPort = zlmServer.getMedia_http_port() != null ? zlmServer.getMedia_http_port() : 9992;
+            for (JsonNode dev : devData) {
+                String deviceId = dev.path("device_id").asText("");
+                if (StringUtils.isBlank(deviceId)) {
+                    continue;
+                }
+                GbDeviceDTO dto = new GbDeviceDTO();
+                dto.setDeviceId(deviceId);
+                String ua = dev.path("user_agent").asText("");
+                dto.setName(StringUtils.isNotBlank(ua) ? ua : deviceId);
+                dto.setPlatformId(gbPlatformId);
+                dto.setStatus(dev.path("online").asBoolean(false) ? "online" : "offline");
+                String streamId = deviceStreamMap.get(deviceId);
+                if (StringUtils.isNotBlank(streamId)) {
+                    dto.setStreamId(streamId);
+                    dto.setPlayUrl("ws://" + browserMediaHost(zlmServer.getHost()) + ":" + httpPort + "/rtp/" + streamId + ".live.flv");
+                }
+                devices.add(dto);
             }
         } catch (Exception e) {
-            log.warn("[GB28181] 从 ZLM 获取国标设备失败: {}, 跳过本次同步（保留原状态）", e.getMessage());
+            log.warn("[GB28181] 从 GB 控制 API 获取设备失败: {}, 跳过本次同步", e.getMessage());
             return null;
         }
         return devices;
