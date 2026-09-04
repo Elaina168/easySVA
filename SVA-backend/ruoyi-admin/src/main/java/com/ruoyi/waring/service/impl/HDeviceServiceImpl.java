@@ -32,6 +32,7 @@ import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Pattern;
@@ -45,6 +46,8 @@ public class HDeviceServiceImpl implements HDeviceService {
 
     private static final String STREAM_SOURCE_TYPE_DIRECT = "DIRECT";
     private static final String STREAM_SOURCE_TYPE_PLATFORM = "PLATFORM";
+    private static final String DEVICE_TYPE_RTSP = "rtsp";
+    private static final String DEVICE_TYPE_GB28181 = "gb28181";
     private static final int MAX_APE_ID_GENERATE_RETRY = 20;
     private static final Pattern STREAM_NAME_PATTERN = Pattern.compile("[^A-Za-z0-9_-]");
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -81,6 +84,7 @@ public class HDeviceServiceImpl implements HDeviceService {
 
     @Override
     public void insertDevice(HDevice device) {
+        normalizeDeviceType(device, null);
         hDeviceMapper.insertDevice(device);
     }
 
@@ -97,6 +101,7 @@ public class HDeviceServiceImpl implements HDeviceService {
     @Override
     public int insertDeviceCrud(HDevice device) {
         normalizeStreamSourceType(device, null);
+        normalizeDeviceType(device, null);
         validateStreamSourceRule(device, null);
         if (StringUtils.isBlank(device.getOrg_name())) {
             throw new ServiceException("组织名称不能为空");
@@ -124,6 +129,7 @@ public class HDeviceServiceImpl implements HDeviceService {
         }
 
         normalizeStreamSourceType(device, existedDevice);
+        normalizeDeviceType(device, existedDevice);
         validateStreamSourceRule(device, existedDevice);
         device.setOrg_index(normalizeOrgIndex(device.getOrg_index()));
 
@@ -144,6 +150,22 @@ public class HDeviceServiceImpl implements HDeviceService {
             throw new ServiceException("stream_source_type 仅支持 PLATFORM 或 DIRECT");
         }
         device.setStream_source_type(streamSourceType);
+    }
+
+    private void normalizeDeviceType(HDevice device, HDevice existedDevice) {
+        String deviceType = device.getDevice_type();
+        if (StringUtils.isBlank(deviceType) && existedDevice != null) {
+            deviceType = existedDevice.getDevice_type();
+        }
+        if (StringUtils.isBlank(deviceType)) {
+            deviceType = DEVICE_TYPE_RTSP;
+        }
+
+        deviceType = deviceType.trim().toLowerCase(Locale.ROOT);
+        if (!DEVICE_TYPE_RTSP.equals(deviceType) && !DEVICE_TYPE_GB28181.equals(deviceType)) {
+            throw new ServiceException("device_type 仅支持 rtsp 或 gb28181");
+        }
+        device.setDevice_type(deviceType);
     }
 
     private void validateStreamSourceRule(HDevice device, HDevice existedDevice) {
@@ -920,7 +942,7 @@ public class HDeviceServiceImpl implements HDeviceService {
         HDevice device = new HDevice();
         device.setApe_id(StringUtils.isNotBlank(gb.getStreamId()) ? gb.getStreamId() : gb.getDeviceId());
         device.setName(StringUtils.isNotBlank(gb.getName()) ? gb.getName() : gb.getDeviceId());
-        device.setDevice_type("gb28181");
+        device.setDevice_type(DEVICE_TYPE_GB28181);
         device.setGb_device_id(gb.getDeviceId());
         device.setGb_platform_id(gb.getPlatformId());
         device.setStream_source_type("DIRECT");
