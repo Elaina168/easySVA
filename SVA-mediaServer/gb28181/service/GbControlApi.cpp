@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include "Common/config.h"
+#include "Common/strCoding.h"
 #include "Http/HttpSession.h"
 #include "Network/TcpServer.h"
 #include "Util/NoticeCenter.h"
@@ -47,6 +48,20 @@ const char *mediaStateName(GbMediaSessionState state) {
         return "stopped";
     case GbMediaFailed:
         return "failed";
+    }
+    return "unknown";
+}
+
+const char *commandStateName(PlatformCommandState state) {
+    switch (state) {
+    case PlatformCommandPending:
+        return "pending";
+    case PlatformCommandSucceeded:
+        return "succeeded";
+    case PlatformCommandFailed:
+        return "failed";
+    case PlatformCommandTimedOut:
+        return "timed_out";
     }
     return "unknown";
 }
@@ -125,6 +140,92 @@ Json::Value sessionJson(const GbMediaSession &session) {
     return value;
 }
 
+Json::Value commandJson(const PlatformCommand &command) {
+    Json::Value value;
+    value["command_id"] = command.commandId;
+    value["type"] = command.type;
+    value["device_id"] = command.deviceId;
+    value["state"] = commandStateName(command.state);
+    value["sip_status"] = command.sipStatus;
+    value["error"] = command.error;
+    value["created_at"] = Json::UInt64(command.createdAt);
+    value["completed_at"] = Json::UInt64(command.completedAt);
+    return value;
+}
+
+bool parseRequestParameters(const mediakit::Parser &parser,
+                            GbControlApi::Parameters &parameters,
+                            int &errorStatus,
+                            std::string &error) {
+    const std::string contentType = lowerAscii(parser["Content-Type"]);
+    if (!parser.content().empty()) {
+        if (contentType.find("application/json") == 0) {
+            Json::Value body;
+            Json::Reader reader;
+            if (!reader.parse(parser.content(), body) || !body.isObject()) {
+                errorStatus = 400;
+                error = "request body must be a JSON object";
+                return false;
+            }
+            const std::vector<std::string> names = body.getMemberNames();
+            for (std::vector<std::string>::const_iterator it = names.begin();
+                 it != names.end(); ++it) {
+                if (body[*it].isArray() || body[*it].isObject()) {
+                    errorStatus = 400;
+                    error = "request parameters must be scalar values";
+                    return false;
+                }
+                parameters[*it] = body[*it].asString();
+            }
+        } else if (contentType.find("application/x-www-form-urlencoded") == 0) {
+            const mediakit::StrCaseMap form =
+                mediakit::Parser::parseArgs(parser.content());
+            for (mediakit::StrCaseMap::const_iterator it = form.begin();
+                 it != form.end(); ++it) {
+                parameters[it->first] =
+                    mediakit::strCoding::UrlDecodeComponent(it->second);
+            }
+        } else {
+            errorStatus = 415;
+            error = "Content-Type must be application/json or application/x-www-form-urlencoded";
+            return false;
+        }
+    }
+
+    const mediakit::StrCaseMap &urlArgs = parser.getUrlArgs();
+    for (mediakit::StrCaseMap::const_iterator it = urlArgs.begin();
+         it != urlArgs.end(); ++it) {
+        parameters[it->first] = it->second;
+    }
+    return true;
+}
+
+bool requiredParameter(const GbControlApi::Parameters &parameters,
+                       const std::string &name,
+                       std::string &value) {
+    GbControlApi::Parameters::const_iterator found = parameters.find(name);
+    if (found == parameters.end() || found->second.empty()) {
+        return false;
+    }
+    value = found->second;
+    return true;
+}
+
+int actionErrorStatus(const std::string &error) {
+    const std::string normalized = lowerAscii(error);
+    if (normalized.find("not registered") != std::string::npos ||
+        normalized.find("was not found") != std::string::npos) {
+        return 404;
+    }
+    if (normalized.find("must contain 20 decimal digits") != std::string::npos) {
+        return 400;
+    }
+    if (normalized.find("failed to send") != std::string::npos) {
+        return 502;
+    }
+    return 409;
+}
+
 } // namespace
 
 GbControlHttpResult::GbControlHttpResult() : statusCode(200) {}
@@ -132,12 +233,14 @@ GbControlHttpResult::GbControlHttpResult() : statusCode(200) {}
 GbControlApi::GbControlApi(const GbSipConfig &config,
                            const RegistrationStore::Ptr &registrations,
                            const DeviceCatalogStore::Ptr &catalogs,
+                           const GbPlatformService::Ptr &platform,
                            const GbLiveService::Ptr &live)
     : _config(config),
       _registrations(registrations ? registrations :
           RegistrationStore::Ptr(new RegistrationStore())),
       _catalogs(catalogs ? catalogs :
           DeviceCatalogStore::Ptr(new DeviceCatalogStore())),
+      _platform(platform),
       _live(live),
       _running(false) {}
 
@@ -163,10 +266,16 @@ void GbControlApi::start() {
             }
             consumed = true;
             Parameters parameters;
-            const mediakit::StrCaseMap &urlArgs = parser.getUrlArgs();
-            for (mediakit::StrCaseMap::const_iterator it = urlArgs.begin();
-                 it != urlArgs.end(); ++it) {
-                parameters[it->first] = it->second;
+            int errorStatus = 0;
+            std::string error;
+            if (!parseRequestParameters(
+                    parser, parameters, errorStatus, error)) {
+                mediakit::HttpSession::KeyValue headers;
+                headers["Content-Type"] = "application/json; charset=utf-8";
+                headers["Cache-Control"] = "no-store";
+                invoker(errorStatus, headers,
+                        jsonResult(errorStatus, errorStatus, error).body);
+                return;
             }
             const GbControlHttpResult result = self->dispatch(
                 parser.method(), parser.url(), parser["Authorization"], parameters);
@@ -176,7 +285,7 @@ void GbControlApi::start() {
             if (result.statusCode == 401) {
                 headers["WWW-Authenticate"] = "Bearer";
             } else if (result.statusCode == 405) {
-                headers["Allow"] = "GET";
+                headers["Allow"] = "GET, POST";
             }
             invoker(result.statusCode, headers, result.body);
         });
@@ -225,11 +334,8 @@ GbControlHttpResult GbControlApi::dispatch(
         const std::string &method,
         const std::string &path,
         const std::string &authorization,
-        const Parameters &parameters) const {
-    if (method != "GET") {
-        return jsonResult(405, 405, "method not allowed");
-    }
-    if (path == "/gb28181/api/health") {
+        const Parameters &parameters) {
+    if (method == "GET" && path == "/gb28181/api/health") {
         Json::Value data;
         data["service"] = "easySVA-GB28181";
         data["status"] = "ok";
@@ -238,7 +344,7 @@ GbControlHttpResult GbControlApi::dispatch(
     if (!authorized(authorization)) {
         return jsonResult(401, 401, "unauthorized");
     }
-    if (path == "/gb28181/api/devices") {
+    if (method == "GET" && path == "/gb28181/api/devices") {
         Json::Value data(Json::arrayValue);
         const std::vector<RegisteredDevice> devices = _registrations->list();
         for (std::vector<RegisteredDevice>::const_iterator it = devices.begin();
@@ -247,7 +353,7 @@ GbControlHttpResult GbControlApi::dispatch(
         }
         return jsonResult(200, 0, "success", data);
     }
-    if (path == "/gb28181/api/catalog") {
+    if (method == "GET" && path == "/gb28181/api/catalog") {
         Parameters::const_iterator deviceId = parameters.find("device_id");
         if (deviceId == parameters.end() || deviceId->second.empty()) {
             return jsonResult(400, 400, "device_id is required");
@@ -261,7 +367,7 @@ GbControlHttpResult GbControlApi::dispatch(
         }
         return jsonResult(200, 0, "success", data);
     }
-    if (path == "/gb28181/api/sessions") {
+    if (method == "GET" && path == "/gb28181/api/sessions") {
         if (!_live) {
             return jsonResult(503, 503, "live service is unavailable");
         }
@@ -272,6 +378,92 @@ GbControlHttpResult GbControlApi::dispatch(
             data.append(sessionJson(*it));
         }
         return jsonResult(200, 0, "success", data);
+    }
+    if (method == "GET" && path == "/gb28181/api/commands") {
+        if (!_platform) {
+            return jsonResult(503, 503, "platform service is unavailable");
+        }
+        Parameters::const_iterator commandId = parameters.find("command_id");
+        if (commandId != parameters.end() && !commandId->second.empty()) {
+            PlatformCommand command;
+            if (!_platform->findCommand(commandId->second, command)) {
+                return jsonResult(404, 404, "platform command was not found");
+            }
+            return jsonResult(200, 0, "success", commandJson(command));
+        }
+        Json::Value data(Json::arrayValue);
+        const std::vector<PlatformCommand> commands = _platform->listCommands();
+        for (std::vector<PlatformCommand>::const_iterator it = commands.begin();
+             it != commands.end(); ++it) {
+            data.append(commandJson(*it));
+        }
+        return jsonResult(200, 0, "success", data);
+    }
+    if (method == "POST" && path == "/gb28181/api/catalog/query") {
+        if (!_platform) {
+            return jsonResult(503, 503, "platform service is unavailable");
+        }
+        std::string deviceId;
+        if (!requiredParameter(parameters, "device_id", deviceId)) {
+            return jsonResult(400, 400, "device_id is required");
+        }
+        std::string error;
+        const std::string commandId = _platform->queryCatalog(deviceId, &error);
+        if (commandId.empty()) {
+            const int status = actionErrorStatus(error);
+            return jsonResult(status, status, error);
+        }
+        PlatformCommand command;
+        _platform->findCommand(commandId, command);
+        return jsonResult(202, 0, "accepted", commandJson(command));
+    }
+    if (method == "POST" && path == "/gb28181/api/live/start") {
+        if (!_live) {
+            return jsonResult(503, 503, "live service is unavailable");
+        }
+        std::string deviceId;
+        std::string channelId;
+        if (!requiredParameter(parameters, "device_id", deviceId)) {
+            return jsonResult(400, 400, "device_id is required");
+        }
+        if (!requiredParameter(parameters, "channel_id", channelId)) {
+            return jsonResult(400, 400, "channel_id is required");
+        }
+        std::string error;
+        const std::string sessionId = _live->startLive(
+            deviceId, channelId, &error);
+        if (sessionId.empty()) {
+            const int status = actionErrorStatus(error);
+            return jsonResult(status, status, error);
+        }
+        GbMediaSession session;
+        if (!_live->findSession(sessionId, session)) {
+            return jsonResult(500, 500, "created media session was not found");
+        }
+        if (session.state == GbMediaFailed) {
+            return jsonResult(502, 502, session.error, sessionJson(session));
+        }
+        return jsonResult(202, 0, "accepted", sessionJson(session));
+    }
+    if (method == "POST" && path == "/gb28181/api/live/stop") {
+        if (!_live) {
+            return jsonResult(503, 503, "live service is unavailable");
+        }
+        std::string sessionId;
+        if (!requiredParameter(parameters, "session_id", sessionId)) {
+            return jsonResult(400, 400, "session_id is required");
+        }
+        std::string error;
+        if (!_live->stopLive(sessionId, &error)) {
+            const int status = actionErrorStatus(error);
+            return jsonResult(status, status, error);
+        }
+        GbMediaSession session;
+        _live->findSession(sessionId, session);
+        return jsonResult(202, 0, "accepted", sessionJson(session));
+    }
+    if (method != "GET" && method != "POST") {
+        return jsonResult(405, 405, "method not allowed");
     }
     return jsonResult(404, 404, "not found");
 }

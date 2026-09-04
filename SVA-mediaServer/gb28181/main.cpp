@@ -114,7 +114,8 @@ int main(int argc, char **argv) {
             }
         });
         GbControlApi::Ptr control(new GbControlApi(
-            config, processor->registrations(), processor->catalogs(), live));
+            config, processor->registrations(), processor->catalogs(),
+            platform, live));
         GbSipTransportServer server;
         server.start(config, processor);
         control->start();
