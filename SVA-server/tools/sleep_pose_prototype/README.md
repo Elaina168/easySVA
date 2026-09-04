@@ -107,6 +107,16 @@ python export_onnx.py \
 
 首轮公开素材已完成程序结构、状态机和 ONNX 可执行性验证，结果见 `docs/BASELINE_RESULTS.md`。由于尚未使用目标机位采集并标注的数据，当前结果不能宣称已达到业务精度。
 
+## 7. 主项目部署注意事项
+
+- 不要将 ONNX 权重和测试视频提交到 Git。部署模型固定放在 `/opt/SVA/models/yolo11n-pose.onnx`。
+- Analyzer 需要对 `config.json` 中 `uploadDir` 下的 `alarm/` 目录具有写权限，否则告警可以入库和录像，但截图字段会为空。
+- 完整 easySVA 进程栈会同时占用 Java、MySQL、Redis、ZLM 和多个 ONNX 会话的内存。虚拟机至少分配 6 GiB，推荐 8 GiB，并配置交换空间。
+- 资源受限时使用 `detect_only`：关闭前端叠加和算法推流，将抽帧率设为 3–5 FPS，并避免同时启动多条验收任务。
+- 后端、前端和 Analyzer 必须使用同一次功能提交构建；老数据库先执行 `SVA-backend/docs/sql/alter_h_device.sql`。
+
+完整平台验收步骤和 2026-09-05 的联调结果见 `docs/ACCEPTANCE_CHECKLIST.md`。
+
 ## 参考项目
 
 - [Ultralytics Pose 文档](https://docs.ultralytics.com/tasks/pose/)

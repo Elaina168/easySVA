@@ -81,4 +81,3 @@ class SimpleIoUTracker:
     def reset(self) -> None:
         self._tracks.clear()
         self._next_track_id = 1
-

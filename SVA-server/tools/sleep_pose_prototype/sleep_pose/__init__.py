@@ -15,4 +15,3 @@ __all__ = [
     "extract_pose_features",
     "load_config",
 ]
-
