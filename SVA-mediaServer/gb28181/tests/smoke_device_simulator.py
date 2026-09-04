@@ -142,7 +142,13 @@ def api_request(port: int, method: str, path: str, body: Optional[Dict[str, str]
         return response.status, json.loads(response.read().decode("utf-8"))
 
 
-def write_config(path: Path, sip_port: int, api_port: int, zlm_port: int) -> None:
+def write_config(
+    path: Path,
+    sip_port: int,
+    api_port: int,
+    zlm_port: int,
+    rtp_tcp_mode: int = 0,
+) -> None:
     path.write_text(
         f"""[sip]
 server_id={PLATFORM_ID}
@@ -180,7 +186,7 @@ zlm_api_timeout_seconds=3
 rtp_advertised_ip=127.0.0.1
 rtp_listen_ip=127.0.0.1
 rtp_port=0
-rtp_tcp_mode=0
+rtp_tcp_mode={rtp_tcp_mode}
 """,
         encoding="utf-8")
 

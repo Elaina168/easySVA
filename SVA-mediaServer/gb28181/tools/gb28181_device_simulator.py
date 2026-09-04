@@ -104,6 +104,7 @@ class MediaOffer:
     ssrc: int
     payload_type: int
     tcp: bool
+    setup: str
 
 
 @dataclass
@@ -171,9 +172,10 @@ def digest_authorization(
 def parse_sdp_offer(body: bytes) -> MediaOffer:
     text = body.decode("utf-8")
     connection = re.search(r"(?im)^c=IN IP4\s+(\S+)\s*$", text)
-    media = re.search(r"(?im)^m=video\s+(\d+)\s+(RTP/(?:AVP|TCP/RTP/AVP))\s+(\d+)\s*$", text)
+    media = re.search(r"(?im)^m=video\s+(\d+)\s+((?:TCP/)?RTP/AVP)\s+(\d+)\s*$", text)
     ssrc = re.search(r"(?im)^y=(\d{10})\s*$", text)
     codec = re.search(r"(?im)^a=rtpmap:(\d+)\s+PS/90000\s*$", text)
+    setup = re.search(r"(?im)^a=setup:(active|passive)\s*$", text)
     if not connection or not media or not ssrc or not codec:
         raise ValueError("INVITE SDP must contain IPv4, video, PS/90000 and y=SSRC")
     payload_type = int(media.group(3))
@@ -188,6 +190,7 @@ def parse_sdp_offer(body: bytes) -> MediaOffer:
         ssrc=int(ssrc.group(1)),
         payload_type=payload_type,
         tcp=media.group(2).upper() != "RTP/AVP",
+        setup=setup.group(1).lower() if setup else "",
     )
 
 
@@ -237,6 +240,12 @@ def packetize_rtp(
         sequence = (sequence + 1) & 0xFFFF
 
 
+def frame_tcp_rtp(packet: bytes) -> bytes:
+    if len(packet) > 65535:
+        raise ValueError("RFC 4571 RTP packet exceeds 65535 bytes")
+    return struct.pack("!H", len(packet)) + packet
+
+
 class PsRtpPusher:
     def __init__(
         self,
@@ -246,6 +255,8 @@ class PsRtpPusher:
         width: int,
         height: int,
         frame_rate: int,
+        listen_ip: str,
+        listen_port: int,
     ) -> None:
         self.offer = offer
         self.ffmpeg = ffmpeg
@@ -253,19 +264,49 @@ class PsRtpPusher:
         self.width = width
         self.height = height
         self.frame_rate = frame_rate
+        self.listen_ip = listen_ip
+        self.requested_listen_port = listen_port
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._process: Optional[subprocess.Popen[bytes]] = None
+        self._listener: Optional[socket.socket] = None
+        self._connection: Optional[socket.socket] = None
         self.packet_count = 0
+
+    @property
+    def listen_port(self) -> int:
+        return int(self._listener.getsockname()[1]) if self._listener else 0
+
+    @property
+    def started(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
+    def prepare(self) -> int:
+        if not self.offer.tcp:
+            return self.offer.port
+        if self.offer.setup != "active":
+            raise ValueError("TCP simulator requires an SDP offer with setup:active")
+        if not self._listener:
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind((self.listen_ip, self.requested_listen_port))
+            listener.listen(1)
+            listener.settimeout(0.2)
+            self._listener = listener
+        return self.listen_port
 
     def start(self) -> None:
         if self.offer.tcp:
-            raise ValueError("the simulator currently supports UDP PS/RTP media only")
+            self.prepare()
         self._thread = threading.Thread(target=self._run, name="gb28181-ps-rtp", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
+        if self._connection:
+            self._connection.close()
+        if self._listener:
+            self._listener.close()
         process = self._process
         if process and process.poll() is None:
             process.terminate()
@@ -299,11 +340,32 @@ class PsRtpPusher:
                 return
             yield chunk
 
+    def _transport(self) -> socket.socket:
+        if not self.offer.tcp:
+            return socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.prepare()
+        assert self._listener is not None
+        while not self._stop.is_set():
+            try:
+                connection, _ = self._listener.accept()
+                self._connection = connection
+                return connection
+            except socket.timeout:
+                continue
+        raise OSError("TCP media listener stopped before ZLMediaKit connected")
+
+    def _send_packet(self, transport: socket.socket, packet: bytes) -> None:
+        if self.offer.tcp:
+            transport.sendall(frame_tcp_rtp(packet))
+        else:
+            transport.sendto(packet, (self.offer.host, self.offer.port))
+
     def _run(self) -> None:
-        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sequence = random.randrange(0, 65536)
         started = time.monotonic()
+        transport: Optional[socket.socket] = None
         try:
+            transport = self._transport()
             self._process = subprocess.Popen(
                 self._command(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             assert self._process.stdout is not None
@@ -314,10 +376,11 @@ class PsRtpPusher:
                 ):
                     if self._stop.is_set():
                         return
-                    udp.sendto(packet, (self.offer.host, self.offer.port))
+                    self._send_packet(transport, packet)
                     self.packet_count += 1
         finally:
-            udp.close()
+            if transport:
+                transport.close()
             process = self._process
             if process and process.poll() is None:
                 process.terminate()
@@ -514,39 +577,55 @@ class GbDeviceSimulator:
 
     def handle_invite(self, request: SipMessage) -> None:
         call_id = request.header("Call-ID")
+        pusher: Optional[PsRtpPusher] = None
         try:
             offer = parse_sdp_offer(request.body)
+            if offer.tcp and offer.setup != "active":
+                raise ValueError("the simulator supports TCP media for platform-active mode")
             if offer.tcp:
-                raise ValueError("TCP media is not enabled in this simulator")
+                pusher = PsRtpPusher(
+                    offer, self.args.ffmpeg, self.args.input,
+                    self.args.width, self.args.height, self.args.frame_rate,
+                    self.args.bind_ip, self.args.media_source_port)
+                answer_port = pusher.prepare()
+            else:
+                answer_port = self.args.media_source_port
         except ValueError as ex:
             self.send_response(self.response(request, 488, "Not Acceptable Here"))
             print(f"INVITE rejected: {ex}", flush=True)
             return
+        transport = "TCP/RTP/AVP" if offer.tcp else "RTP/AVP"
+        tcp_attributes = (
+            "a=setup:passive\r\na=connection:new\r\n" if offer.tcp else "")
         sdp = (
             "v=0\r\n"
             f"o={self.args.device_id} 0 0 IN IP4 {self.args.advertised_ip}\r\n"
             "s=Play\r\n"
             f"c=IN IP4 {self.args.advertised_ip}\r\n"
             "t=0 0\r\n"
-            f"m=video {self.args.media_source_port} RTP/AVP {offer.payload_type}\r\n"
+            f"m=video {answer_port} {transport} {offer.payload_type}\r\n"
             "a=sendonly\r\n"
+            f"{tcp_attributes}"
             f"a=rtpmap:{offer.payload_type} PS/90000\r\n"
             f"y={offer.ssrc:010d}\r\n"
         ).encode("ascii")
         accepted = self.response(request, 200, "OK", sdp, "application/sdp")
-        self.dialogs[call_id] = MediaDialog(request, accepted, offer)
+        self.dialogs[call_id] = MediaDialog(request, accepted, offer, pusher)
         self.send_response(accepted)
         print(
-            f"INVITE accepted: call={call_id}, RTP={offer.host}:{offer.port}, "
+            f"INVITE accepted: call={call_id}, transport={'TCP' if offer.tcp else 'UDP'}, "
+            f"RTP={offer.host}:{offer.port}, device_port={answer_port}, "
             f"SSRC={offer.ssrc:010d}", flush=True)
 
     def start_media(self, call_id: str) -> None:
         dialog = self.dialogs.get(call_id)
-        if not dialog or dialog.pusher:
+        if not dialog or (dialog.pusher and dialog.pusher.started):
             return
-        dialog.pusher = PsRtpPusher(
-            dialog.offer, self.args.ffmpeg, self.args.input,
-            self.args.width, self.args.height, self.args.frame_rate)
+        if not dialog.pusher:
+            dialog.pusher = PsRtpPusher(
+                dialog.offer, self.args.ffmpeg, self.args.input,
+                self.args.width, self.args.height, self.args.frame_rate,
+                self.args.bind_ip, self.args.media_source_port)
         dialog.pusher.start()
         print(f"ACK received; PS/RTP push started: call={call_id}", flush=True)
 
@@ -623,7 +702,7 @@ def valid_gb_id(value: str) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run a reproducible GB28181 UDP device and PS-over-RTP stream")
+        description="Run a reproducible GB28181 device and PS-over-RTP stream")
     parser.add_argument("--platform-host", default="127.0.0.1")
     parser.add_argument("--platform-port", type=int, default=5060)
     parser.add_argument("--platform-id", type=valid_gb_id, default="34020000002000000001")
@@ -647,7 +726,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, default=360)
     parser.add_argument("--frame-rate", type=int, default=25)
     parser.add_argument("--media-source-port", type=int, default=30000,
-                        help="device port announced in the SDP answer")
+                        help="device TCP media listener port; zero selects a free port")
     return parser
 
 
