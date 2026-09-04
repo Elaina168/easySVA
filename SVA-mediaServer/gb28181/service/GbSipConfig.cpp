@@ -90,6 +90,12 @@ void readString(const toolkit::mINI &ini, const std::string &key, std::string &v
     }
 }
 
+bool isLoopbackAddress(const std::string &address) {
+    const std::string normalized = lowerAscii(address);
+    return normalized == "localhost" || normalized == "::1" ||
+        normalized.compare(0, 4, "127.") == 0;
+}
+
 } // namespace
 
 GbSipConfig::GbSipConfig()
@@ -110,6 +116,9 @@ GbSipConfig::GbSipConfig()
       heartbeatTimeoutSeconds(90),
       transactionTimeoutSeconds(5),
       maxMessageBytes(1024 * 1024),
+      apiEnabled(true),
+      apiListenIp("127.0.0.1"),
+      apiPort(18080),
       zlmApiUrl("http://127.0.0.1:9992"),
       zlmApiTimeoutSeconds(5),
       rtpListenIp("0.0.0.0"),
@@ -131,6 +140,8 @@ bool GbSipConfig::parse(const std::string &text,
     readString(ini, "sip.advertised_ip", parsed.advertisedIp);
     readString(ini, "sip.listen_ip", parsed.listenIp);
     readString(ini, "registration.device_password", parsed.devicePassword);
+    readString(ini, "api.listen_ip", parsed.apiListenIp);
+    readString(ini, "api.secret", parsed.apiSecret);
     readString(ini, "media.zlm_api_url", parsed.zlmApiUrl);
     readString(ini, "media.zlm_api_secret", parsed.zlmApiSecret);
     readString(ini, "media.rtp_advertised_ip", parsed.rtpAdvertisedIp);
@@ -148,6 +159,7 @@ bool GbSipConfig::parse(const std::string &text,
     unsigned long long maxExpires = parsed.maxRegisterExpires;
     unsigned long long heartbeatTimeout = parsed.heartbeatTimeoutSeconds;
     unsigned long long transactionTimeout = parsed.transactionTimeoutSeconds;
+    unsigned long long apiPort = parsed.apiPort;
     unsigned long long zlmApiTimeout = parsed.zlmApiTimeoutSeconds;
     unsigned long long rtpPort = parsed.rtpPort;
     unsigned long long rtpTcpMode = parsed.rtpTcpMode;
@@ -163,6 +175,8 @@ bool GbSipConfig::parse(const std::string &text,
                       heartbeatTimeout, error) ||
         !readUnsigned(ini, "sip.transaction_timeout_seconds", 1, 60,
                       transactionTimeout, error) ||
+        !readUnsigned(ini, "api.port", 1, 65535, apiPort, error) ||
+        !readBoolean(ini, "api.enabled", parsed.apiEnabled, error) ||
         !readUnsigned(ini, "media.zlm_api_timeout_seconds", 1, 60,
                       zlmApiTimeout, error) ||
         !readUnsigned(ini, "media.rtp_port", 0, 65535,
@@ -184,6 +198,7 @@ bool GbSipConfig::parse(const std::string &text,
     parsed.maxRegisterExpires = static_cast<uint32_t>(maxExpires);
     parsed.heartbeatTimeoutSeconds = static_cast<uint32_t>(heartbeatTimeout);
     parsed.transactionTimeoutSeconds = static_cast<uint32_t>(transactionTimeout);
+    parsed.apiPort = static_cast<uint16_t>(apiPort);
     parsed.zlmApiTimeoutSeconds = static_cast<uint32_t>(zlmApiTimeout);
     parsed.rtpPort = static_cast<uint16_t>(rtpPort);
     parsed.rtpTcpMode = static_cast<int>(rtpTcpMode);
@@ -214,6 +229,10 @@ bool GbSipConfig::load(const std::string &path,
     const char *environmentSecret = std::getenv("EASY_SVA_ZLM_API_SECRET");
     if (environmentSecret && *environmentSecret) {
         config.zlmApiSecret = environmentSecret;
+    }
+    const char *apiEnvironmentSecret = std::getenv("EASY_SVA_GB_API_SECRET");
+    if (apiEnvironmentSecret && *apiEnvironmentSecret) {
+        config.apiSecret = apiEnvironmentSecret;
     }
     return true;
 }
@@ -274,6 +293,22 @@ bool GbSipConfig::validate(std::string *error) const {
     }
     if (transactionTimeoutSeconds == 0 || transactionTimeoutSeconds > 60) {
         setError(error, "sip.transaction_timeout_seconds must be between 1 and 60");
+        return false;
+    }
+    if (apiEnabled && apiListenIp.empty()) {
+        setError(error, "api.listen_ip cannot be empty when the API is enabled");
+        return false;
+    }
+    if (apiEnabled && apiPort == 0) {
+        setError(error, "api.port must be between 1 and 65535 when the API is enabled");
+        return false;
+    }
+    const char *apiEnvironmentSecret = std::getenv("EASY_SVA_GB_API_SECRET");
+    const bool hasApiSecret = !apiSecret.empty() ||
+        (apiEnvironmentSecret && *apiEnvironmentSecret);
+    if (apiEnabled && !isLoopbackAddress(apiListenIp) && !hasApiSecret) {
+        setError(error,
+            "api.secret or EASY_SVA_GB_API_SECRET is required for a non-loopback API listener");
         return false;
     }
     if (zlmApiUrl.compare(0, 7, "http://") != 0 &&

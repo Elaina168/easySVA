@@ -556,11 +556,11 @@ add_subdirectory(3rdpart)
 
 add_subdirectory(src)
 
+add_subdirectory(ext-codec)
+
 if(ENABLE_GB28181_SIGNALING)
   add_subdirectory(gb28181)
 endif()
-
-add_subdirectory(ext-codec)
 
 if(ENABLE_SRT)
   add_subdirectory(srt)
