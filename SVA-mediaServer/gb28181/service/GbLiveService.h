@@ -19,6 +19,8 @@
 namespace easy_sva {
 namespace gb28181 {
 
+struct GbSdpDescription;
+
 class GbLiveService : public std::enable_shared_from_this<GbLiveService> {
 public:
     typedef std::shared_ptr<GbLiveService> Ptr;
@@ -67,6 +69,8 @@ private:
                       const SipMessage &invite,
                       uint64_t inviteCseq,
                       const SipTransactionResult &result);
+    void finishRtpConnect(const std::string &sessionId,
+                          const ZlmRtpConnectResult &result);
     bool beginBye(const std::string &sessionId,
                   const std::string &failureReason,
                   std::string *error = nullptr);
@@ -83,7 +87,8 @@ private:
                           bool closeRtp);
     bool validateAcceptedSdp(const GbMediaSession &session,
                              const SipMessage &response,
-                             std::string &error) const;
+                             std::string &error,
+                             GbSdpDescription *description = nullptr) const;
     std::string token(const std::string &prefix, uint64_t sequence) const;
     static std::string ssrcForSequence(uint64_t sequence);
 

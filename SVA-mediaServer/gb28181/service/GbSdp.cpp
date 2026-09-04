@@ -73,7 +73,7 @@ bool containsWhitespace(const std::string &value) {
 
 } // namespace
 
-GbSdpOffer::GbSdpOffer() : destinationPort(0), tcpPassive(false) {}
+GbSdpOffer::GbSdpOffer() : destinationPort(0), tcpMode(0) {}
 
 GbSdpDescription::GbSdpDescription() : mediaPort(0), direction("sendrecv") {}
 
@@ -135,6 +135,10 @@ bool GbSdp::buildPlayOffer(const GbSdpOffer &offer,
         setError(error, "GB28181 SDP destination port must be positive");
         return false;
     }
+    if (offer.tcpMode < 0 || offer.tcpMode > 2) {
+        setError(error, "GB28181 SDP TCP mode must be 0, 1, or 2");
+        return false;
+    }
     uint32_t numericSsrc = 0;
     if (!parseSsrc(offer.ssrc, numericSsrc, error)) {
         return false;
@@ -142,7 +146,7 @@ bool GbSdp::buildPlayOffer(const GbSdpOffer &offer,
 
     const std::string addressType =
         offer.destinationIp.find(':') == std::string::npos ? "IP4" : "IP6";
-    const std::string transport = offer.tcpPassive ? "TCP/RTP/AVP" : "RTP/AVP";
+    const std::string transport = offer.tcpMode == 0 ? "RTP/AVP" : "TCP/RTP/AVP";
     std::ostringstream output;
     output << "v=0\r\n"
            << "o=" << offer.platformId << " 0 0 IN " << addressType << " "
@@ -153,8 +157,8 @@ bool GbSdp::buildPlayOffer(const GbSdpOffer &offer,
            << "t=0 0\r\n"
            << "m=video " << offer.destinationPort << " " << transport << " 96\r\n"
            << "a=recvonly\r\n";
-    if (offer.tcpPassive) {
-        output << "a=setup:passive\r\n"
+    if (offer.tcpMode != 0) {
+        output << "a=setup:" << (offer.tcpMode == 1 ? "passive" : "active") << "\r\n"
                << "a=connection:new\r\n";
     }
     output << "a=rtpmap:96 PS/90000\r\n"

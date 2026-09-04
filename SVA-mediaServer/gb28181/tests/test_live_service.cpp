@@ -47,11 +47,12 @@ struct Fixture {
     std::vector<std::string> outbound;
     std::vector<ZlmHttpRequest> zlmRequests;
     bool openSucceeds;
+    bool connectSucceeds;
     bool signalingSucceeds;
 
     Fixture()
         : now(1000), registrations(new RegistrationStore()),
-          catalogs(new DeviceCatalogStore()), openSucceeds(true),
+          catalogs(new DeviceCatalogStore()), openSucceeds(true), connectSucceeds(true),
           signalingSucceeds(true) {
         config.advertisedIp = "203.0.113.10";
         config.rtpAdvertisedIp = "198.51.100.10";
@@ -73,6 +74,10 @@ struct Fixture {
                     response.body = openSucceeds
                         ? "{\"code\":0,\"port\":30000}"
                         : "{\"code\":-1,\"msg\":\"bind failed\"}";
+                } else if (request.url.find("connectRtpServer") != std::string::npos) {
+                    response.body = connectSucceeds
+                        ? "{\"code\":0}"
+                        : "{\"code\":-1,\"msg\":\"connect failed\"}";
                 } else {
                     response.body = "{\"code\":0,\"hit\":1}";
                 }
@@ -141,6 +146,21 @@ std::string validAnswer(const std::string &ssrc) {
            "t=0 0\r\n"
            "m=video 62000 RTP/AVP 96\r\n"
            "a=sendonly\r\n"
+           "a=rtpmap:96 PS/90000\r\n"
+           "y=" + ssrc + "\r\n";
+}
+
+std::string validTcpAnswer(const std::string &ssrc,
+                           const std::string &setup) {
+    return "v=0\r\n"
+           "o=34020000001320000001 0 0 IN IP4 192.0.2.20\r\n"
+           "s=Play\r\n"
+           "c=IN IP4 192.0.2.20\r\n"
+           "t=0 0\r\n"
+           "m=video 62000 TCP/RTP/AVP 96\r\n"
+           "a=sendonly\r\n"
+           "a=setup:" + setup + "\r\n"
+           "a=connection:new\r\n"
            "a=rtpmap:96 PS/90000\r\n"
            "y=" + ssrc + "\r\n";
 }
@@ -392,15 +412,65 @@ void testTimeoutAndInputValidation() {
            session.error.find("timed out") != std::string::npos &&
            fixture.zlmCallCount("closeRtpServer") == 1,
            "INVITE timeout fails the session and releases RTP");
+}
 
+void testTcpActiveLifecycle() {
     Fixture activeTcp;
     activeTcp.config.rtpTcpMode = 2;
     activeTcp.rebuild();
     activeTcp.addDevice();
     activeTcp.addChannel();
-    expect(activeTcp.live->startLive(deviceId, channelId, &error).empty() &&
-           error.find("connectRtpServer") != std::string::npos,
-           "TCP active mode is rejected until its required connect step exists");
+    std::string error;
+    const std::string sessionId = activeTcp.live->startLive(
+        deviceId, channelId, &error);
+    const SipMessage invite = activeTcp.lastRequest("INVITE");
+    expect(!sessionId.empty() &&
+           invite.body().find("TCP/RTP/AVP") != std::string::npos &&
+           invite.body().find("a=setup:active") != std::string::npos,
+           "TCP active mode opens an RTP receiver and sends an active SDP offer");
+    GbMediaSession session;
+    activeTcp.live->findSession(sessionId, session);
+    activeTcp.live->handleResponse(finalResponse(
+        invite, 200, "OK", validTcpAnswer(session.ssrc, "passive")));
+    activeTcp.live->findSession(sessionId, session);
+    expect(session.state == GbMediaStreaming &&
+           activeTcp.zlmCallCount("connectRtpServer") == 1,
+           "passive device answer triggers ZLM TCP connect before streaming");
+    const ZlmHttpRequest connectRequest = activeTcp.zlmRequests[1];
+    expect(connectRequest.formBody.find("dst_url=192.0.2.20") != std::string::npos &&
+           connectRequest.formBody.find("dst_port=62000") != std::string::npos,
+           "TCP connect uses the endpoint from the device SDP answer");
+    activeTcp.live->stopLive(sessionId, &error);
+    activeTcp.live->handleResponse(finalResponse(
+        activeTcp.lastRequest("BYE"), 200, "OK"));
+    activeTcp.live->findSession(sessionId, session);
+    expect(session.state == GbMediaStopped &&
+           activeTcp.zlmCallCount("closeRtpServer") == 1,
+           "TCP active session follows the normal BYE and RTP cleanup path");
+
+    Fixture failedConnect;
+    failedConnect.config.rtpTcpMode = 2;
+    failedConnect.connectSucceeds = false;
+    failedConnect.rebuild();
+    failedConnect.addDevice();
+    failedConnect.addChannel();
+    const std::string failedId = failedConnect.live->startLive(
+        deviceId, channelId, &error);
+    const SipMessage failedInvite = failedConnect.lastRequest("INVITE");
+    failedConnect.live->findSession(failedId, session);
+    failedConnect.live->handleResponse(finalResponse(
+        failedInvite, 200, "OK", validTcpAnswer(session.ssrc, "passive")));
+    failedConnect.live->findSession(failedId, session);
+    expect(session.state == GbMediaStopping &&
+           failedConnect.lastRequest("BYE").method() == "BYE",
+           "failed ZLM TCP connection terminates the accepted SIP dialog");
+    failedConnect.live->handleResponse(finalResponse(
+        failedConnect.lastRequest("BYE"), 200, "OK"));
+    failedConnect.live->findSession(failedId, session);
+    expect(session.state == GbMediaFailed &&
+           session.error.find("connect failed") != std::string::npos &&
+           failedConnect.zlmCallCount("closeRtpServer") == 1,
+           "TCP connection failure is retained and releases the RTP receiver");
 }
 
 } // namespace
@@ -414,6 +484,7 @@ int main() {
     testDeviceInitiatedBye();
     testCrossedByeCancelsLocalTransaction();
     testTimeoutAndInputValidation();
+    testTcpActiveLifecycle();
 
     if (failures != 0) {
         std::cerr << failures << " GB28181 live-service test(s) failed" << std::endl;

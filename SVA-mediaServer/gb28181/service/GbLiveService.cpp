@@ -121,10 +121,6 @@ std::string GbLiveService::startLive(const std::string &deviceId,
         setError(error, "GB28181 device and channel IDs must contain 20 decimal digits");
         return std::string();
     }
-    if (_config.rtpTcpMode == 2) {
-        setError(error, "GB28181 TCP active media requires connectRtpServer support");
-        return std::string();
-    }
 
     RegisteredDevice device;
     if (!_registrations->find(deviceId, device)) {
@@ -225,7 +221,7 @@ void GbLiveService::onRtpOpened(const std::string &sessionId,
         ? _config.advertisedIp : _config.rtpAdvertisedIp;
     offer.destinationPort = session.rtpPort;
     offer.ssrc = session.ssrc;
-    offer.tcpPassive = _config.rtpTcpMode == 1;
+    offer.tcpMode = _config.rtpTcpMode;
     std::string sdp;
     if (!GbSdp::buildPlayOffer(offer, sdp, &error)) {
         failBeforeDialog(sessionId, GbMediaPreparing, error, true);
@@ -254,7 +250,8 @@ void GbLiveService::onRtpOpened(const std::string &sessionId,
 
 bool GbLiveService::validateAcceptedSdp(const GbMediaSession &session,
                                         const SipMessage &response,
-                                        std::string &error) const {
+                                        std::string &error,
+                                        GbSdpDescription *description) const {
     if (!hasTag(response.header("To"))) {
         error = "accepted GB28181 INVITE response has no To tag";
         return false;
@@ -288,10 +285,17 @@ bool GbLiveService::validateAcceptedSdp(const GbMediaSession &session,
         error = "GB28181 device SDP does not send media";
         return false;
     }
-    if (session.tcp && !answer.setup.empty() &&
-        lowerAscii(answer.setup) != "active") {
-        error = "GB28181 TCP device SDP must answer with active setup";
-        return false;
+    if (session.tcp) {
+        const std::string expectedSetup = _config.rtpTcpMode == 2
+            ? "passive" : "active";
+        if (lowerAscii(answer.setup) != expectedSetup) {
+            error = "GB28181 TCP device SDP must answer with " +
+                expectedSetup + " setup";
+            return false;
+        }
+    }
+    if (description) {
+        *description = answer;
     }
     return true;
 }
@@ -335,7 +339,8 @@ void GbLiveService::finishInvite(const std::string &sessionId,
     }
 
     std::string validationError;
-    validateAcceptedSdp(session, result.response, validationError);
+    GbSdpDescription answer;
+    validateAcceptedSdp(session, result.response, validationError, &answer);
     if (!ackSent && validationError.empty()) {
         validationError = "failed to send ACK for accepted GB28181 INVITE";
     }
@@ -351,10 +356,53 @@ void GbLiveService::finishInvite(const std::string &sessionId,
         return;
     }
 
+    if (_config.rtpTcpMode == 2) {
+        ZlmRtpConnectOptions options;
+        options.streamId = session.streamId;
+        options.destinationHost = answer.connectionAddress;
+        options.destinationPort = answer.mediaPort;
+        std::weak_ptr<GbLiveService> weakSelf = shared_from_this();
+        _zlm->connectRtpServer(options,
+            [weakSelf, sessionId](const ZlmRtpConnectResult &connectResult) {
+                const Ptr self = weakSelf.lock();
+                if (self) {
+                    self->finishRtpConnect(sessionId, connectResult);
+                }
+            });
+        return;
+    }
+
     std::string transitionError;
     if (!_sessions->transition(sessionId, GbMediaInviting, GbMediaStreaming,
                                _clock(), std::string(), &transitionError)) {
         beginBye(sessionId, transitionError, nullptr);
+    }
+}
+
+void GbLiveService::finishRtpConnect(const std::string &sessionId,
+                                     const ZlmRtpConnectResult &result) {
+    if (!result.ok) {
+        std::string transitionError;
+        if (_sessions->transition(sessionId, GbMediaInviting, GbMediaStopping,
+                                  _clock(), std::string(), &transitionError)) {
+            beginBye(sessionId, result.error, nullptr);
+        } else {
+            failBeforeDialog(sessionId, GbMediaInviting,
+                             result.error + "; " + transitionError, true);
+        }
+        return;
+    }
+
+    std::string transitionError;
+    if (!_sessions->transition(sessionId, GbMediaInviting, GbMediaStreaming,
+                               _clock(), std::string(), &transitionError)) {
+        if (_sessions->transition(sessionId, GbMediaInviting, GbMediaStopping,
+                                  _clock())) {
+            beginBye(sessionId, transitionError, nullptr);
+        } else {
+            failBeforeDialog(sessionId, GbMediaInviting,
+                             transitionError, true);
+        }
     }
 }
 
