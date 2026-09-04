@@ -21,6 +21,8 @@ set(GB28181_SERVICE_SOURCES
   service/DigestNonceStore.h
   service/GbPlatformService.cpp
   service/GbPlatformService.h
+  service/GbLiveService.cpp
+  service/GbLiveService.h
   service/GbSdp.cpp
   service/GbSdp.h
   service/GbSipConfig.cpp
@@ -117,6 +119,10 @@ if(ENABLE_TESTS)
   target_compile_options(test_gb28181_sip_dialog PRIVATE ${COMPILE_OPTIONS_DEFAULT})
   target_link_libraries(test_gb28181_sip_dialog PRIVATE easySVA::GB28181Service)
 
+  add_executable(test_gb28181_live_service tests/test_live_service.cpp)
+  target_compile_options(test_gb28181_live_service PRIVATE ${COMPILE_OPTIONS_DEFAULT})
+  target_link_libraries(test_gb28181_live_service PRIVATE easySVA::GB28181Service)
+
   add_executable(test_gb28181_zlm_api tests/test_zlm_api.cpp)
   target_compile_options(test_gb28181_zlm_api PRIVATE ${COMPILE_OPTIONS_DEFAULT})
   target_link_libraries(test_gb28181_zlm_api PRIVATE easySVA::GB28181Service)
@@ -129,6 +135,7 @@ if(ENABLE_TESTS)
     set_property(TARGET test_gb28181_platform_commands PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_media_session PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_sip_dialog PROPERTY FOLDER "gb28181/test")
+    set_property(TARGET test_gb28181_live_service PROPERTY FOLDER "gb28181/test")
     set_property(TARGET test_gb28181_zlm_api PROPERTY FOLDER "gb28181/test")
   endif()
 endif()

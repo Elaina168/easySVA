@@ -9,11 +9,13 @@
 #include "Poller/EventPoller.h"
 #include "Util/logger.h"
 #include "Util/util.h"
+#include "service/GbLiveService.h"
 #include "service/GbPlatformService.h"
 #include "service/GbSipConfig.h"
 #include "service/GbSipRequestProcessor.h"
 #include "service/GbSipTransport.h"
 
+using easy_sva::gb28181::GbLiveService;
 using easy_sva::gb28181::GbPlatformService;
 using easy_sva::gb28181::GbSipConfig;
 using easy_sva::gb28181::GbSipRequestProcessor;
@@ -95,9 +97,14 @@ int main(int argc, char **argv) {
         std::shared_ptr<GbSipRequestProcessor> processor(new GbSipRequestProcessor(config));
         GbPlatformService::Ptr platform(new GbPlatformService(
             config, processor->registrations(), processor->catalogs()));
-        processor->setResponseHandler([platform](const easy_sva::gb28181::SipMessage &response,
-                                                  const easy_sva::gb28181::SipPeer &) {
-            platform->handleResponse(response);
+        GbLiveService::Ptr live(new GbLiveService(
+            config, processor->registrations(), processor->catalogs()));
+        processor->setResponseHandler([platform, live](
+                const easy_sva::gb28181::SipMessage &response,
+                const easy_sva::gb28181::SipPeer &) {
+            if (!platform->handleResponse(response)) {
+                live->handleResponse(response);
+            }
         });
         GbSipTransportServer server;
         server.start(config, processor);
@@ -110,6 +117,7 @@ int main(int argc, char **argv) {
             if (std::chrono::steady_clock::now() >= nextSweep) {
                 processor->sweep();
                 platform->sweep();
+                live->sweep();
                 nextSweep = std::chrono::steady_clock::now() + std::chrono::seconds(1);
             }
         }
