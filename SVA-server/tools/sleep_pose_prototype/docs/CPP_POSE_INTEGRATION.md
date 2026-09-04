@@ -17,6 +17,7 @@
 - 按 `streamCode + controlCode + trackId` 隔离的 `NORMAL/SUSPECT/SLEEP/RECOVER` 状态；
 - `behaviorType=sleep` 复用现有行为事件链路；
 - 睡岗诊断信息加入检测事件 JSON；
+- 输出 `headPitchProxyDeg` 作为头部相对肩线的二维俯仰代理角（COCO 2D 关键点不能恢复真实三维俯仰角）；
 - 不依赖视频和模型的 `SleepPoseUnitTest`。
 
 当前实现仍要求双肩和至少一个头部点有效。单肩被完全遮挡时该帧记为未知观测，不会触发睡岗，也不会错误地当作已经恢复；轨迹持续丢失超过 1 秒后清除历史。这是 v0.1 的已知边界，后续应使用目标机位的遮挡样本决定是否增加单肩降级逻辑。
@@ -71,10 +72,11 @@ ctest --test-dir /tmp/easy-sva-build --output-on-failure
 /tmp/easy-sva-build/PoseSmokeTest \
   /opt/SVA/models/yolo11n-pose.onnx \
   ~/easy-sva-mo/SVA-server/tools/sleep_pose_prototype/materials/raw/P01_sleep_desk.mp4 \
-  /mnt/hgfs/easySVA-share/results/sleep_pose_v0.1/P01_cpp_pose.mp4
+  /mnt/hgfs/easySVA-share/results/sleep_pose_v0.1/P01_cpp_pose.mp4 \
+  /mnt/hgfs/easySVA-share/results/sleep_pose_v0.1/P01_cpp_features.csv
 ```
 
-程序完成后会输出帧数、检测数、睡岗告警数、首次告警毫秒、处理秒数和吞吐率。默认 15 秒确认窗口下，P01 预期 `sleep_alerts=1` 且 `first_sleep_alert_ms` 接近 15000。打开 `P01_cpp_pose.mp4`，检查：
+程序完成后会输出帧数、检测数、睡岗告警数、首次告警毫秒、处理秒数和吞吐率，并生成逐帧特征 CSV。默认 15 秒确认窗口下，P01 预期 `sleep_alerts=1` 且 `first_sleep_alert_ms` 接近 15000。打开 `P01_cpp_pose.mp4`，检查：
 
 1. 人框覆盖正确人物；
 2. 鼻、眼、耳、肩、肘、腕等关键点位置合理；

@@ -39,8 +39,9 @@ for input_path in "${inputs[@]}"; do
   filename=$(basename "$input_path")
   sample_name=${filename%.*}
   output_path="$output_dir/${sample_name}_cpp.mp4"
+  features_path="$output_dir/${sample_name}_cpp_features.csv"
   echo "sample=$filename" | tee -a "$summary_path"
-  "$smoke_test" "$model_path" "$input_path" "$output_path" | tee -a "$summary_path"
+  "$smoke_test" "$model_path" "$input_path" "$output_path" "$features_path" | tee -a "$summary_path"
 done
 
 echo "summary=$summary_path"

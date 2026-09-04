@@ -53,6 +53,7 @@ namespace SVAAnalyzer
         std::optional<float> shoulderCenterY;
         std::optional<float> shoulderWidth;
         std::optional<float> headHeightRatio;
+        std::optional<float> headPitchProxyDeg;
         std::optional<float> headSideRatio;
         std::optional<float> shoulderAngleDeg;
         std::optional<float> headArmDistanceRatio;

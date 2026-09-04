@@ -71,6 +71,8 @@ namespace
         expect(features.validKeypointCount == 3, "valid keypoint count is preserved");
         expect(features.headHeightRatio.has_value() && near(*features.headHeightRatio, 0.20f),
                "head height is normalized by shoulder width");
+        expect(features.headPitchProxyDeg.has_value() && near(*features.headPitchProxyDeg, 11.3099f),
+               "image-plane head pitch proxy is calculated in degrees");
         expect(features.headSideRatio.has_value() && near(*features.headSideRatio, 0.40f),
                "head side offset is normalized by shoulder width");
 

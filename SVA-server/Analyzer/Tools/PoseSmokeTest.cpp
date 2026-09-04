@@ -6,7 +6,11 @@
 #include <chrono>
 #include <cstdio>
 #include <exception>
+#include <fstream>
+#include <iomanip>
 #include <opencv2/opencv.hpp>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +27,68 @@ namespace
     bool isVisible(const SVAAnalyzer::PoseKeypoint &keypoint)
     {
         return keypoint.confidence >= KEYPOINT_CONFIDENCE;
+    }
+
+    std::string csvEscape(const std::string &value)
+    {
+        std::string escaped;
+        escaped.reserve(value.size() + 2);
+        escaped.push_back('"');
+        for (const char character : value)
+        {
+            if (character == '"')
+            {
+                escaped.push_back('"');
+            }
+            escaped.push_back(character);
+        }
+        escaped.push_back('"');
+        return escaped;
+    }
+
+    std::string optionalNumber(const std::optional<float> &value)
+    {
+        if (!value.has_value())
+        {
+            return {};
+        }
+        std::ostringstream output;
+        output << std::fixed << std::setprecision(6) << *value;
+        return output.str();
+    }
+
+    void writeFeatureRow(std::ofstream &output,
+                         int64_t frameId,
+                         int64_t timestampMs,
+                         const SVAAnalyzer::DetectObject &detect)
+    {
+        const auto &analysis = detect.sleepPose;
+        output << frameId << ','
+               << timestampMs << ','
+               << detect.trackId << ','
+               << detect.x1 << ',' << detect.y1 << ',' << detect.x2 << ',' << detect.y2 << ','
+               << (analysis.featuresValid ? 1 : 0) << ','
+               << csvEscape(analysis.invalidReason) << ','
+               << analysis.validKeypointCount << ','
+               << optionalNumber(analysis.headX) << ','
+               << optionalNumber(analysis.headY) << ','
+               << optionalNumber(analysis.shoulderWidth) << ','
+               << optionalNumber(analysis.headHeightRatio) << ','
+               << optionalNumber(analysis.headPitchProxyDeg) << ','
+               << optionalNumber(analysis.headSideRatio) << ','
+               << optionalNumber(analysis.shoulderAngleDeg) << ','
+               << optionalNumber(analysis.headArmDistanceRatio) << ','
+               << optionalNumber(analysis.torsoAngleDeg) << ','
+               << optionalNumber(analysis.headMotionRatio) << ','
+               << (analysis.candidate ? 1 : 0) << ','
+               << std::fixed << std::setprecision(6)
+               << analysis.sleepScore << ','
+               << analysis.validRatio << ','
+               << analysis.positiveRatio << ','
+               << csvEscape(analysis.state) << ','
+               << (analysis.transitioned ? 1 : 0) << ','
+               << (analysis.alert ? 1 : 0) << ','
+               << csvEscape(analysis.evidence) << '\n';
     }
 
     void drawPose(cv::Mat &image, const SVAAnalyzer::DetectObject &detect)
@@ -82,15 +148,16 @@ namespace
 
 int main(int argc, char **argv)
 {
-    if (argc != 4)
+    if (argc != 4 && argc != 5)
     {
-        std::fprintf(stderr, "Usage: %s <pose.onnx> <input.mp4> <annotated.mp4>\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s <pose.onnx> <input.mp4> <annotated.mp4> [features.csv]\n", argv[0]);
         return 2;
     }
 
     const std::string modelPath = argv[1];
     const std::string sourcePath = argv[2];
     const std::string outputPath = argv[3];
+    const std::string featuresPath = argc == 5 ? argv[4] : std::string{};
 
     try
     {
@@ -117,6 +184,21 @@ int main(int argc, char **argv)
         {
             std::fprintf(stderr, "Could not open output video: %s\n", outputPath.c_str());
             return 4;
+        }
+
+        std::ofstream featureOutput;
+        if (!featuresPath.empty())
+        {
+            featureOutput.open(featuresPath, std::ios::out | std::ios::trunc);
+            if (!featureOutput.is_open())
+            {
+                std::fprintf(stderr, "Could not open feature CSV: %s\n", featuresPath.c_str());
+                return 7;
+            }
+            featureOutput << "frame_id,timestamp_ms,track_id,x1,y1,x2,y2,features_valid,invalid_reason,"
+                             "valid_keypoint_count,head_x,head_y,shoulder_width,head_height_ratio,head_pitch_proxy_deg,head_side_ratio,"
+                             "shoulder_angle_deg,head_arm_distance_ratio,torso_angle_deg,head_motion_ratio,candidate,"
+                             "sleep_score,valid_ratio,positive_ratio,state,transitioned,alert,evidence\n";
         }
 
         int64_t frameCount = 0;
@@ -157,6 +239,10 @@ int main(int argc, char **argv)
                                                           sleepConfig);
             for (const auto &detect : detects)
             {
+                if (featureOutput.is_open())
+                {
+                    writeFeatureRow(featureOutput, frameCount, timestampMs, detect);
+                }
                 if (detect.sleepPose.alert)
                 {
                     if (firstSleepAlertMs < 0)
@@ -178,14 +264,15 @@ int main(int argc, char **argv)
         const double elapsedSeconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - startedAt).count();
         const double throughput = elapsedSeconds > 0.0 ? static_cast<double>(frameCount) / elapsedSeconds : 0.0;
-        std::printf("frames=%lld detections=%lld sleep_alerts=%lld first_sleep_alert_ms=%lld seconds=%.3f throughput_fps=%.3f output=%s\n",
+        std::printf("frames=%lld detections=%lld sleep_alerts=%lld first_sleep_alert_ms=%lld seconds=%.3f throughput_fps=%.3f output=%s features=%s\n",
                     static_cast<long long>(frameCount),
                     static_cast<long long>(detectionCount),
                     static_cast<long long>(sleepAlertCount),
                     static_cast<long long>(firstSleepAlertMs),
                     elapsedSeconds,
                     throughput,
-                    outputPath.c_str());
+                    outputPath.c_str(),
+                    featuresPath.empty() ? "disabled" : featuresPath.c_str());
         return 0;
     }
     catch (const std::exception &e)

@@ -837,6 +837,7 @@ namespace SVAAnalyzer
                     appendOptionalFloat("shoulderCenterY", obj.sleepPose.shoulderCenterY);
                     appendOptionalFloat("shoulderWidth", obj.sleepPose.shoulderWidth);
                     appendOptionalFloat("headHeightRatio", obj.sleepPose.headHeightRatio);
+                    appendOptionalFloat("headPitchProxyDeg", obj.sleepPose.headPitchProxyDeg);
                     appendOptionalFloat("headSideRatio", obj.sleepPose.headSideRatio);
                     appendOptionalFloat("shoulderAngleDeg", obj.sleepPose.shoulderAngleDeg);
                     appendOptionalFloat("headArmDistanceRatio", obj.sleepPose.headArmDistanceRatio);

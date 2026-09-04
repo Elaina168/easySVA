@@ -235,6 +235,7 @@ namespace SVAAnalyzer
             analysis.shoulderCenterY = features.shoulderCenterY;
             analysis.shoulderWidth = features.shoulderWidth;
             analysis.headHeightRatio = features.headHeightRatio;
+            analysis.headPitchProxyDeg = features.headPitchProxyDeg;
             analysis.headSideRatio = features.headSideRatio;
             analysis.shoulderAngleDeg = features.shoulderAngleDeg;
             analysis.headArmDistanceRatio = features.headArmDistanceRatio;
@@ -329,6 +330,12 @@ namespace SVAAnalyzer
         features.shoulderCenterY = shoulderCenterY;
         features.shoulderWidth = shoulderWidth;
         features.headHeightRatio = (shoulderCenterY - headY) / shoulderWidth;
+        // COCO 2D keypoints cannot recover a true 3D head pitch. This angle is a
+        // stable image-plane proxy: a smaller value means the head is closer to
+        // the shoulder line. The state machine retains the equivalent normalized
+        // height ratio so v0.1 thresholds and behavior stay unchanged.
+        features.headPitchProxyDeg = degreesFromRadians(
+            std::atan2(shoulderCenterY - headY, shoulderWidth));
         features.headSideRatio = std::abs(headX - shoulderCenterX) / shoulderWidth;
         features.shoulderAngleDeg = degreesFromRadians(
             std::atan2(rightShoulder.y - leftShoulder.y,
