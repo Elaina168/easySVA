@@ -28,14 +28,14 @@ void expect(bool condition, const std::string &message) {
     }
 }
 
-GbSdpOffer sampleOffer(bool tcp) {
+GbSdpOffer sampleOffer(int tcpMode) {
     GbSdpOffer offer;
     offer.platformId = "34020000002000000001";
     offer.channelId = "34020000001320000001";
     offer.destinationIp = "192.0.2.10";
     offer.destinationPort = 30000;
     offer.ssrc = "0100000001";
-    offer.tcpPassive = tcp;
+    offer.tcpMode = tcpMode;
     return offer;
 }
 
@@ -81,7 +81,7 @@ void testUdpPlayOffer() {
 void testTcpPassivePlayOffer() {
     std::string sdp;
     std::string error;
-    expect(GbSdp::buildPlayOffer(sampleOffer(true), sdp, &error),
+    expect(GbSdp::buildPlayOffer(sampleOffer(1), sdp, &error),
            "TCP passive play offer builds: " + error);
     expect(sdp.find("TCP/RTP/AVP") != std::string::npos &&
            sdp.find("a=setup:passive\r\n") != std::string::npos &&
@@ -91,6 +91,25 @@ void testTcpPassivePlayOffer() {
     expect(GbSdp::parse(sdp, parsed, &error) && parsed.isTcp() &&
            parsed.setup == "passive" && parsed.connection == "new",
            "TCP setup attributes survive parsing");
+}
+
+void testTcpActivePlayOffer() {
+    std::string sdp;
+    std::string error;
+    expect(GbSdp::buildPlayOffer(sampleOffer(2), sdp, &error),
+           "TCP active play offer builds: " + error);
+    expect(sdp.find("TCP/RTP/AVP") != std::string::npos &&
+           sdp.find("a=setup:active\r\n") != std::string::npos &&
+           sdp.find("a=connection:new\r\n") != std::string::npos,
+           "TCP active offer asks the platform to initiate the media connection");
+    GbSdpDescription parsed;
+    expect(GbSdp::parse(sdp, parsed, &error) && parsed.isTcp() &&
+           parsed.setup == "active",
+           "TCP active setup survives parsing");
+    GbSdpOffer invalid = sampleOffer(3);
+    expect(!GbSdp::buildPlayOffer(invalid, sdp, &error) &&
+           error.find("TCP mode") != std::string::npos,
+           "unknown SDP TCP mode is rejected");
 }
 
 void testDeviceAnswerParsing() {
@@ -242,6 +261,7 @@ void testPreparingReservation() {
 int main() {
     testUdpPlayOffer();
     testTcpPassivePlayOffer();
+    testTcpActivePlayOffer();
     testDeviceAnswerParsing();
     testFirstVideoSectionWins();
     testSdpValidation();

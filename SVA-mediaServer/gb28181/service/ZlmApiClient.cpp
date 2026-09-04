@@ -30,6 +30,11 @@ ZlmRtpOpenOptions::ZlmRtpOpenOptions()
 
 ZlmRtpOpenResult::ZlmRtpOpenResult() : ok(false), port(0) {}
 
+ZlmRtpConnectOptions::ZlmRtpConnectOptions()
+    : destinationPort(0), vhost("__defaultVhost__"), app("rtp") {}
+
+ZlmRtpConnectResult::ZlmRtpConnectResult() : ok(false) {}
+
 ZlmRtpCloseResult::ZlmRtpCloseResult() : ok(false), hit(false) {}
 
 ZlmApiClient::ZlmApiClient(const GbSipConfig &config,
@@ -131,6 +136,13 @@ void ZlmApiClient::completeOpen(const OpenCompletion &completion,
     }
 }
 
+void ZlmApiClient::completeConnect(const ConnectCompletion &completion,
+                                   const ZlmRtpConnectResult &result) {
+    if (completion) {
+        completion(result);
+    }
+}
+
 void ZlmApiClient::completeClose(const CloseCompletion &completion,
                                  const ZlmRtpCloseResult &result) {
     if (completion) {
@@ -211,6 +223,59 @@ void ZlmApiClient::openRtpServer(const ZlmRtpOpenOptions &options,
         result.ok = true;
         result.port = static_cast<uint16_t>(port);
         completeOpen(completion, result);
+    });
+}
+
+void ZlmApiClient::connectRtpServer(const ZlmRtpConnectOptions &options,
+                                    const ConnectCompletion &completion) const {
+    ZlmRtpConnectResult invalid;
+    if (_baseUrl.empty()) {
+        invalid.error = "ZLMediaKit API URL is empty";
+        completeConnect(completion, invalid);
+        return;
+    }
+    if (_secret.empty()) {
+        invalid.error = "EASY_SVA_ZLM_API_SECRET is not configured";
+        completeConnect(completion, invalid);
+        return;
+    }
+    if (options.streamId.empty()) {
+        invalid.error = "ZLMediaKit RTP stream ID is empty";
+        completeConnect(completion, invalid);
+        return;
+    }
+    if (options.destinationHost.empty()) {
+        invalid.error = "GB28181 TCP active destination address is empty";
+        completeConnect(completion, invalid);
+        return;
+    }
+    if (options.destinationPort == 0) {
+        invalid.error = "GB28181 TCP active destination port must be positive";
+        completeConnect(completion, invalid);
+        return;
+    }
+
+    ZlmHttpRequest request;
+    request.url = endpoint("/index/api/connectRtpServer");
+    request.timeoutSeconds = _timeoutSeconds;
+    request.formBody =
+        "secret=" + formEncode(_secret) +
+        "&stream_id=" + formEncode(options.streamId) +
+        "&dst_url=" + formEncode(options.destinationHost) +
+        "&dst_port=" + std::to_string(options.destinationPort) +
+        "&vhost=" + formEncode(options.vhost) +
+        "&app=" + formEncode(options.app);
+
+    _requester(request, [completion](const ZlmHttpResponse &response) {
+        ZlmRtpConnectResult result;
+        int code = 0;
+        std::string message;
+        if (!parseApiResult(response, code, message, &result.error)) {
+            completeConnect(completion, result);
+            return;
+        }
+        result.ok = true;
+        completeConnect(completion, result);
     });
 }
 

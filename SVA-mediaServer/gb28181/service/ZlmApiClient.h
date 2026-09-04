@@ -44,6 +44,23 @@ struct ZlmRtpOpenResult {
     ZlmRtpOpenResult();
 };
 
+struct ZlmRtpConnectOptions {
+    std::string streamId;
+    std::string destinationHost;
+    uint16_t destinationPort;
+    std::string vhost;
+    std::string app;
+
+    ZlmRtpConnectOptions();
+};
+
+struct ZlmRtpConnectResult {
+    bool ok;
+    std::string error;
+
+    ZlmRtpConnectResult();
+};
+
 struct ZlmRtpCloseResult {
     bool ok;
     bool hit;
@@ -57,6 +74,7 @@ public:
     typedef std::function<void(const ZlmHttpResponse &)> HttpCompletion;
     typedef std::function<void(const ZlmHttpRequest &, const HttpCompletion &)> Requester;
     typedef std::function<void(const ZlmRtpOpenResult &)> OpenCompletion;
+    typedef std::function<void(const ZlmRtpConnectResult &)> ConnectCompletion;
     typedef std::function<void(const ZlmRtpCloseResult &)> CloseCompletion;
 
     explicit ZlmApiClient(const GbSipConfig &config,
@@ -64,6 +82,8 @@ public:
 
     void openRtpServer(const ZlmRtpOpenOptions &options,
                        const OpenCompletion &completion) const;
+    void connectRtpServer(const ZlmRtpConnectOptions &options,
+                          const ConnectCompletion &completion) const;
     void closeRtpServer(const std::string &streamId,
                         const CloseCompletion &completion) const;
 
@@ -77,6 +97,8 @@ private:
                                std::string *error);
     static void completeOpen(const OpenCompletion &completion,
                              const ZlmRtpOpenResult &result);
+    static void completeConnect(const ConnectCompletion &completion,
+                                const ZlmRtpConnectResult &result);
     static void completeClose(const CloseCompletion &completion,
                               const ZlmRtpCloseResult &result);
     std::string endpoint(const std::string &path) const;

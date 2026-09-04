@@ -9,6 +9,8 @@ using easy_sva::gb28181::GbSipConfig;
 using easy_sva::gb28181::ZlmApiClient;
 using easy_sva::gb28181::ZlmHttpRequest;
 using easy_sva::gb28181::ZlmHttpResponse;
+using easy_sva::gb28181::ZlmRtpConnectOptions;
+using easy_sva::gb28181::ZlmRtpConnectResult;
 using easy_sva::gb28181::ZlmRtpCloseResult;
 using easy_sva::gb28181::ZlmRtpOpenOptions;
 using easy_sva::gb28181::ZlmRtpOpenResult;
@@ -100,6 +102,45 @@ void testCloseRtpServer() {
     expect(second.ok && !second.hit, "repeated close is successful and reports no hit");
 }
 
+void testConnectRtpServer() {
+    ZlmHttpRequest captured;
+    ZlmApiClient client(sampleConfig(),
+        [&captured](const ZlmHttpRequest &request,
+                    const ZlmApiClient::HttpCompletion &completion) {
+            captured = request;
+            ZlmHttpResponse response;
+            response.statusCode = 200;
+            response.body = "{\"code\":0}";
+            completion(response);
+        });
+    ZlmRtpConnectOptions options;
+    options.streamId = "gb channel/1";
+    options.destinationHost = "192.0.2.20";
+    options.destinationPort = 62000;
+    ZlmRtpConnectResult result;
+    client.connectRtpServer(options, [&result](const ZlmRtpConnectResult &value) {
+        result = value;
+    });
+    expect(result.ok, "connectRtpServer accepts a successful ZLM response");
+    expect(captured.url == "http://127.0.0.1:9992/index/api/connectRtpServer",
+           "connectRtpServer uses the configured ZLM endpoint");
+    expect(captured.formBody.find("stream_id=gb%20channel%2F1") != std::string::npos &&
+           captured.formBody.find("dst_url=192.0.2.20") != std::string::npos &&
+           captured.formBody.find("dst_port=62000") != std::string::npos,
+           "connectRtpServer sends the device endpoint and stream ID");
+
+    int requests = 0;
+    ZlmApiClient validationClient(sampleConfig(),
+        [&requests](const ZlmHttpRequest &, const ZlmApiClient::HttpCompletion &) {
+            ++requests;
+        });
+    options.destinationPort = 0;
+    validationClient.connectRtpServer(
+        options, [&result](const ZlmRtpConnectResult &value) { result = value; });
+    expect(!result.ok && result.error.find("port") != std::string::npos && requests == 0,
+           "connectRtpServer rejects an invalid device port before network access");
+}
+
 void testValidation() {
     GbSipConfig missingSecret = sampleConfig();
     missingSecret.zlmApiSecret.clear();
@@ -185,6 +226,7 @@ void testCloseMalformedResponse() {
 int main() {
     testOpenRtpServer();
     testCloseRtpServer();
+    testConnectRtpServer();
     testValidation();
     testApiFailures();
     testCloseMalformedResponse();

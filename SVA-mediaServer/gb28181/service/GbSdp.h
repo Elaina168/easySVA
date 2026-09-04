@@ -15,7 +15,7 @@ struct GbSdpOffer {
     std::string destinationIp;
     uint16_t destinationPort;
     std::string ssrc;
-    bool tcpPassive;
+    int tcpMode;
 
     GbSdpOffer();
 };
