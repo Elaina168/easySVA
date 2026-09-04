@@ -133,7 +133,11 @@ bool GbSipConfig::parse(const std::string &text,
     readString(ini, "registration.device_password", parsed.devicePassword);
     readString(ini, "media.zlm_api_url", parsed.zlmApiUrl);
     readString(ini, "media.zlm_api_secret", parsed.zlmApiSecret);
+    readString(ini, "media.rtp_advertised_ip", parsed.rtpAdvertisedIp);
     readString(ini, "media.rtp_listen_ip", parsed.rtpListenIp);
+    if (parsed.rtpAdvertisedIp.empty()) {
+        parsed.rtpAdvertisedIp = parsed.advertisedIp;
+    }
 
     unsigned long long port = parsed.sipPort;
     unsigned long long idleTimeout = parsed.idleTimeoutSeconds;
@@ -279,6 +283,10 @@ bool GbSipConfig::validate(std::string *error) const {
     }
     if (zlmApiTimeoutSeconds == 0 || zlmApiTimeoutSeconds > 60) {
         setError(error, "media.zlm_api_timeout_seconds must be between 1 and 60");
+        return false;
+    }
+    if (rtpAdvertisedIp.empty()) {
+        setError(error, "media.rtp_advertised_ip cannot be empty after fallback");
         return false;
     }
     if (rtpListenIp.empty()) {

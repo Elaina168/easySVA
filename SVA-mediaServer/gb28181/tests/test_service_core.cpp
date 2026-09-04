@@ -104,6 +104,7 @@ void testConfigParsing() {
         "zlm_api_url=http://127.0.0.1:19992/\n"
         "zlm_api_secret=test-api-secret\n"
         "zlm_api_timeout_seconds=7\n"
+        "rtp_advertised_ip=198.51.100.10\n"
         "rtp_listen_ip=127.0.0.1\n"
         "rtp_port=31000\n"
         "rtp_tcp_mode=1\n";
@@ -127,9 +128,15 @@ void testConfigParsing() {
     expect(config.zlmApiUrl == "http://127.0.0.1:19992/" &&
            config.zlmApiSecret == "test-api-secret" && config.zlmApiTimeoutSeconds == 7,
            "ZLMediaKit API settings are parsed");
-    expect(config.rtpListenIp == "127.0.0.1" && config.rtpPort == 31000 &&
+    expect(config.rtpAdvertisedIp == "198.51.100.10" &&
+           config.rtpListenIp == "127.0.0.1" && config.rtpPort == 31000 &&
            config.rtpTcpMode == 1,
            "RTP receiver settings are parsed");
+
+    GbSipConfig fallback;
+    expect(GbSipConfig::parse("[sip]\nadvertised_ip=203.0.113.8\n", fallback, &error) &&
+           fallback.rtpAdvertisedIp == "203.0.113.8",
+           "RTP advertised address falls back to the SIP advertised address");
 
     expect(!GbSipConfig::parse("[sip]\nserver_id=bad\n", config, &error),
            "non-standard platform IDs are rejected");
