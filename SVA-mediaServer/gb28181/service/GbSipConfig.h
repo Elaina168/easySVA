@@ -29,6 +29,7 @@ struct GbSipConfig {
     std::string zlmApiUrl;
     std::string zlmApiSecret;
     uint32_t zlmApiTimeoutSeconds;
+    std::string rtpAdvertisedIp;
     std::string rtpListenIp;
     uint16_t rtpPort;
     int rtpTcpMode;
