@@ -35,6 +35,8 @@ public:
                           std::string *error = nullptr);
     bool stopLive(const std::string &sessionId,
                   std::string *error = nullptr);
+    bool handleRequest(const SipMessage &request,
+                       SipMessage &response);
     bool handleResponse(const SipMessage &response);
     void sweep();
 
@@ -47,8 +49,10 @@ private:
     struct MediaDialog {
         SipMessage invite;
         SipMessage acceptedResponse;
+        SipMessage bye;
         RegisteredDevice::Sender sender;
         uint64_t nextCseq;
+        std::string failureReason;
 
         MediaDialog();
     };

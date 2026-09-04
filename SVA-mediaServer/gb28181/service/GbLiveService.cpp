@@ -6,6 +6,7 @@
 
 #include "DigestNonceStore.h"
 #include "GbSdp.h"
+#include "core/SipResponse.h"
 #include "SipRequestFactory.h"
 
 namespace easy_sva {
@@ -61,6 +62,21 @@ bool parseCseqMethod(const SipMessage &message, std::string &method) {
     uint64_t sequence = 0;
     std::string trailing;
     return (input >> sequence >> method) && !(input >> trailing);
+}
+
+std::string headerTag(const std::string &header) {
+    const std::string lowered = lowerAscii(header);
+    const size_t parameter = lowered.find(";tag=");
+    if (parameter == std::string::npos) {
+        return std::string();
+    }
+    const size_t begin = parameter + 5;
+    size_t end = begin;
+    while (end < header.size() && header[end] != ';' && header[end] != ',' &&
+           header[end] != '>' && header[end] != ' ' && header[end] != '\t') {
+        ++end;
+    }
+    return header.substr(begin, end - begin);
 }
 
 } // namespace
@@ -367,6 +383,7 @@ bool GbLiveService::beginBye(const std::string &sessionId,
                              const std::string &failureReason,
                              std::string *error) {
     MediaDialog dialog;
+    SipMessage bye;
     {
         std::lock_guard<std::mutex> lock(_mutex);
         std::map<std::string, MediaDialog>::iterator found = _dialogs.find(sessionId);
@@ -383,11 +400,13 @@ bool GbLiveService::beginBye(const std::string &sessionId,
             return false;
         }
         dialog = found->second;
+        bye = SipRequestFactory::dialogBye(
+            _config, dialog.invite, dialog.acceptedResponse,
+            dialog.nextCseq, token("bye", _sequence.fetch_add(1) + 1));
+        found->second.failureReason = failureReason;
+        found->second.bye = bye;
         ++found->second.nextCseq;
     }
-    const SipMessage bye = SipRequestFactory::dialogBye(
-        _config, dialog.invite, dialog.acceptedResponse,
-        dialog.nextCseq, token("bye", _sequence.fetch_add(1) + 1));
     std::weak_ptr<GbLiveService> weakSelf = shared_from_this();
     return _transactions->send(
         bye, dialog.sender, _config.transactionTimeoutSeconds,
@@ -462,6 +481,84 @@ void GbLiveService::failBeforeDialog(const std::string &sessionId,
     }
     std::lock_guard<std::mutex> lock(_mutex);
     _dialogs.erase(sessionId);
+}
+
+bool GbLiveService::handleRequest(const SipMessage &request,
+                                  SipMessage &response) {
+    if (!request.isRequest() || request.method() != "BYE") {
+        return false;
+    }
+
+    const bool hasRequiredHeaders = request.hasHeader("Via") &&
+        request.hasHeader("From") && request.hasHeader("To") &&
+        request.hasHeader("Call-ID") && request.hasHeader("CSeq");
+    std::string cseqMethod;
+    if (!hasRequiredHeaders || !parseCseqMethod(request, cseqMethod) ||
+        cseqMethod != "BYE") {
+        response = SipResponse::fromRequest(
+            request, 400, "Bad Request", _config.serverId);
+        return true;
+    }
+
+    GbMediaSession session;
+    if (!_sessions->findByCallId(request.header("Call-ID"), session) ||
+        (session.state != GbMediaStreaming &&
+         session.state != GbMediaStopping)) {
+        response = SipResponse::fromRequest(
+            request, 481, "Call/Transaction Does Not Exist", _config.serverId);
+        return true;
+    }
+
+    MediaDialog dialog;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        std::map<std::string, MediaDialog>::const_iterator found =
+            _dialogs.find(session.sessionId);
+        if (found == _dialogs.end()) {
+            response = SipResponse::fromRequest(
+                request, 481, "Call/Transaction Does Not Exist", _config.serverId);
+            return true;
+        }
+        dialog = found->second;
+    }
+
+    const std::string localTag = headerTag(dialog.invite.header("From"));
+    const std::string remoteTag = headerTag(dialog.acceptedResponse.header("To"));
+    if (localTag.empty() || remoteTag.empty() ||
+        headerTag(request.header("From")) != remoteTag ||
+        headerTag(request.header("To")) != localTag) {
+        response = SipResponse::fromRequest(
+            request, 481, "Call/Transaction Does Not Exist", _config.serverId);
+        return true;
+    }
+
+    if (session.state == GbMediaStreaming &&
+        !_sessions->transition(session.sessionId, GbMediaStreaming,
+                               GbMediaStopping, _clock())) {
+        response = SipResponse::fromRequest(
+            request, 481, "Call/Transaction Does Not Exist", _config.serverId);
+        return true;
+    }
+    if (dialog.bye.isRequest()) {
+        _transactions->cancel(dialog.bye);
+    }
+
+    response = SipResponse::fromRequest(request, 200, "OK", _config.serverId);
+    const GbMediaSessionState terminalState = dialog.failureReason.empty()
+        ? GbMediaStopped : GbMediaFailed;
+    std::weak_ptr<GbLiveService> weakSelf = shared_from_this();
+    const std::string sessionId = session.sessionId;
+    const std::string detail = dialog.failureReason;
+    _zlm->closeRtpServer(session.streamId,
+        [weakSelf, sessionId, terminalState, detail](
+                const ZlmRtpCloseResult &closeResult) {
+            const Ptr self = weakSelf.lock();
+            if (self) {
+                self->finishAfterRtpClose(sessionId, terminalState,
+                                          detail, closeResult);
+            }
+        });
+    return true;
 }
 
 bool GbLiveService::handleResponse(const SipMessage &response) {
