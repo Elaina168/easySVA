@@ -276,10 +276,19 @@ python3 ./gb28181/tests/smoke_real_zlm.py \
   --ffprobe /usr/local/bin/ffprobe
 ```
 
-这个测试使用临时配置和动态端口，不读取或改写生产密钥。它会要求 ZLMediaKit 真正生成 RTSP 流，并通过 FFmpeg 解码 10 帧，而不只是检查 RTP UDP 包是否到达。
+这个测试使用临时配置和动态端口，不读取或改写生产密钥。它会要求 ZLMediaKit 真正生成 RTSP 流，并通过 FFmpeg 解码 10 帧，而不只是检查 RTP UDP 包是否到达。上面的命令验证 UDP；平台主动建立 TCP/RTP 连接的模式用下面的命令验证：
+
+```bash
+python3 ./gb28181/tests/smoke_real_zlm.py \
+  --server ./release/linux/Release/GbSipServer \
+  --media-server ./release/linux/Release/MediaServer \
+  --ffmpeg /usr/local/bin/ffmpeg \
+  --ffprobe /usr/local/bin/ffprobe \
+  --rtp-tcp-mode 2
+```
 
 ## 八、目前的边界
 
-当前生产路径完整支持 SIP over UDP/TCP，媒体接收支持 RTP over UDP 和 TCP 被动模式。配套模拟器目前只发送 UDP PS/RTP。`media.rtp_tcp_mode=2` 的 TCP 主动模式还需要接入 ZLMediaKit `connectRtpServer`，配置为 2 时服务会明确拒绝点播，不会假装成功。
+当前生产路径完整支持 SIP over UDP/TCP，媒体接收支持 RTP over UDP、TCP 被动和 TCP 主动三种模式。模式 `2` 会在设备返回 `setup:passive` 的 SDP 后调用 ZLMediaKit `connectRtpServer`；连接成功前会话不会进入 `streaming`。配套模拟器可以验证 UDP 和平台主动 TCP 两条路径，暂不模拟“设备主动连接平台”的 TCP 被动媒体模式。
 
 本实现负责的是实时点播主链路，不包含录像检索、回放、云台控制、报警订阅、语音对讲和国标级联。生产部署还需要按网络拓扑配置防火墙、NAT 映射、设备独立密码和 HTTPS/API 访问控制。

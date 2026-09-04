@@ -139,7 +139,8 @@ def run(args: argparse.Namespace) -> None:
         sip_config = temporary / "gb28181.ini"
         log_dir = temporary / "log"
         write_media_config(args.media_config.resolve(), media_config, ports)
-        harness.write_config(sip_config, ports["sip"], ports["api"], ports["http"])
+        harness.write_config(
+            sip_config, ports["sip"], ports["api"], ports["http"], args.rtp_tcp_mode)
         try:
             media_server = start_process([
                 str(media_server_path), "-c", str(media_config),
@@ -167,6 +168,8 @@ def run(args: argparse.Namespace) -> None:
                 "--run-seconds", "45",
                 "--ffmpeg", str(ffmpeg_path),
                 "--width", "320", "--height", "180", "--frame-rate", "10",
+                "--media-source-port",
+                "0" if args.rtp_tcp_mode == 2 else "30000",
             ], simulator_path.parent)
             harness.wait_for(
                 "registered device and heartbeat",
@@ -193,7 +196,8 @@ def run(args: argparse.Namespace) -> None:
             video = probe_rtsp(ffprobe_path, rtsp_url)
             decode_rtsp(ffmpeg_path, rtsp_url)
             print(
-                f"real ZLMediaKit RTSP decode passed: {video['codec_name']} "
+                f"real ZLMediaKit {['UDP', 'TCP passive', 'TCP active'][args.rtp_tcp_mode]} "
+                f"RTSP decode passed: {video['codec_name']} "
                 f"{video['width']}x{video['height']}, stream={stream_id}")
 
             status, stopped = harness.api_request(
@@ -234,6 +238,8 @@ def main() -> None:
         default=Path(__file__).parents[1] / "tools" / "gb28181_device_simulator.py")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--ffprobe", default="ffprobe")
+    parser.add_argument("--rtp-tcp-mode", type=int, choices=(0, 2), default=0,
+                        help="0 tests UDP; 2 tests platform-active TCP/RTP")
     run(parser.parse_args())
 
 

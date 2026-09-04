@@ -64,6 +64,21 @@ class SdpAndMediaTests(unittest.TestCase):
         self.assertEqual(offer.payload_type, 96)
         self.assertFalse(offer.tcp)
 
+    def test_parse_tcp_active_offer(self):
+        offer = simulator.parse_sdp_offer(
+            b"v=0\r\nc=IN IP4 127.0.0.1\r\n"
+            b"m=video 30000 TCP/RTP/AVP 96\r\n"
+            b"a=setup:active\r\na=connection:new\r\n"
+            b"a=rtpmap:96 PS/90000\r\ny=0100000001\r\n")
+        self.assertTrue(offer.tcp)
+        self.assertEqual(offer.setup, "active")
+
+    def test_tcp_rtp_uses_rfc4571_length_prefix(self):
+        packet = b"rtp-packet"
+        framed = simulator.frame_tcp_rtp(packet)
+        self.assertEqual(struct.unpack("!H", framed[:2])[0], len(packet))
+        self.assertEqual(framed[2:], packet)
+
     def test_ps_pack_split_survives_chunk_boundaries(self):
         pack1 = simulator.PS_PACK_START + b"one"
         pack2 = simulator.PS_PACK_START + b"two"
