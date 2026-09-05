@@ -677,6 +677,7 @@ export default {
       if (behaviorType === 'dwell') return '停留';
       if (behaviorType === 'low_speed') return '低速';
       if (behaviorType === 'loitering') return '徘徊';
+      if (behaviorType === 'sleep') return '睡岗';
       if (behaviorType === 'absence') return '缺席';
       if (behaviorType === 'count_threshold') return '数量阈值';
       if (behaviorType === 'occupancy') return '占用';

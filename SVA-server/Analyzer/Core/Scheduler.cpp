@@ -4,6 +4,8 @@
 #include "Worker.h"
 #include "Algorithm.h"
 #include "AlgorithmOnYolo.h"
+#include "AlgorithmOnYoloPose.h"
+#include "SleepPoseEvaluator.h"
 #include "GenerateAlarmVideo.h"
 #include "Utils/Common.h"
 #include "Utils/Log.h"
@@ -59,6 +61,36 @@ namespace SVAAnalyzer
         bool isSequenceBehaviorRule(const BehaviorRuleConfig &rule)
         {
             return rule.enabled && !rule.sequenceId.empty() && !isAggregateBehaviorType(rule.behaviorType);
+        }
+
+        bool resolveSleepPoseConfig(const Control &control, SleepPoseConfig &config)
+        {
+            for (const BehaviorRuleConfig &rule : control.behaviorRules)
+            {
+                if (!rule.enabled || rule.behaviorType != "sleep")
+                {
+                    continue;
+                }
+                config.keypointConfidence = static_cast<float>(rule.keypointConfidence);
+                config.confirmWindowMs = rule.thresholdMs > 0 ? rule.thresholdMs : 15000;
+                config.sleepPositiveRatio = static_cast<float>(rule.sleepPositiveRatio);
+                config.minimumValidRatio = static_cast<float>(rule.minimumValidRatio);
+                config.recoveryMs = rule.recoveryMs;
+                config.headHeightRatioMax = static_cast<float>(rule.headHeightRatioMax);
+                config.headSideRatioMin = static_cast<float>(rule.headSideRatioMin);
+                config.headArmDistanceRatioMax = static_cast<float>(rule.headArmDistanceRatioMax);
+                config.torsoAngleDegMin = static_cast<float>(rule.torsoAngleDegMin);
+                config.shoulderTiltDegMin = static_cast<float>(rule.shoulderTiltDegMin);
+                config.motionWindowMs = rule.motionWindowMs;
+                config.headMotionRatioMax = static_cast<float>(rule.headMotionRatioMax);
+                return true;
+            }
+            return false;
+        }
+
+        std::string sleepPoseContextKey(const Control &control, const std::string &streamCode)
+        {
+            return streamCode + "\x1f" + control.code;
         }
 
         std::string safeMediaPathSegment(const std::string &value)
@@ -141,6 +173,10 @@ namespace SVAAnalyzer
             delete on_yolo26n_80;
             on_yolo26n_80 = nullptr;
         }
+        if (on_yolo11n_pose) {
+            delete on_yolo11n_pose;
+            on_yolo11n_pose = nullptr;
+        }
 
         clearAlarmQueue();
         clearDetectFrameQueue();
@@ -187,7 +223,22 @@ namespace SVAAnalyzer
         modelPath = mConfig->modelDir + "/yolo26s.onnx";
         on_yolo26n_80 = new AlgorithmOnYolo(mConfig, modelPath, classNames, "on_yolo26n_80");
 
-        LOGI("initAlgorithm() end - total ONNX models loaded: 2");
+        int loadedModelCount = 2;
+        modelPath = mConfig->modelDir + "/yolo11n-pose.onnx";
+        std::ifstream poseModel(modelPath, std::ios::binary);
+        if (poseModel.good())
+        {
+            poseModel.close();
+            LOGI("初始化 on_yolo11n_pose (yolo11n-pose.onnx)");
+            on_yolo11n_pose = new AlgorithmOnYoloPose(mConfig, modelPath, "on_yolo11n_pose");
+            ++loadedModelCount;
+        }
+        else
+        {
+            LOGI("跳过 on_yolo11n_pose，模型不存在: %s", modelPath.c_str());
+        }
+
+        LOGI("initAlgorithm() end - total ONNX models loaded: %d", loadedModelCount);
         return true;
     }
     void Scheduler::loop()
@@ -750,6 +801,58 @@ namespace SVAAnalyzer
                 item["className"] = obj.className;
                 item["algorithmCode"] = obj.algorithmCode;
                 item["happen"] = obj.happen;
+                item["hasPose"] = obj.hasPose;
+                if (obj.hasPose)
+                {
+                    Json::Value keypoints(Json::arrayValue);
+                    for (size_t keypointIndex = 0; keypointIndex < obj.keypoints.size(); ++keypointIndex)
+                    {
+                        const PoseKeypoint &keypoint = obj.keypoints[keypointIndex];
+                        Json::Value point;
+                        point["index"] = static_cast<Json::UInt>(keypointIndex);
+                        point["x"] = keypoint.x;
+                        point["y"] = keypoint.y;
+                        point["confidence"] = keypoint.confidence;
+                        keypoints.append(point);
+                    }
+                    item["keypoints"] = keypoints;
+                }
+                if (obj.sleepPose.evaluated)
+                {
+                    Json::Value sleepPose;
+                    sleepPose["featuresValid"] = obj.sleepPose.featuresValid;
+                    sleepPose["invalidReason"] = obj.sleepPose.invalidReason;
+                    sleepPose["validKeypointCount"] = obj.sleepPose.validKeypointCount;
+                    auto appendOptionalFloat = [&sleepPose](const char *name,
+                                                            const std::optional<float> &value)
+                    {
+                        if (value.has_value())
+                        {
+                            sleepPose[name] = *value;
+                        }
+                    };
+                    appendOptionalFloat("headX", obj.sleepPose.headX);
+                    appendOptionalFloat("headY", obj.sleepPose.headY);
+                    appendOptionalFloat("shoulderCenterX", obj.sleepPose.shoulderCenterX);
+                    appendOptionalFloat("shoulderCenterY", obj.sleepPose.shoulderCenterY);
+                    appendOptionalFloat("shoulderWidth", obj.sleepPose.shoulderWidth);
+                    appendOptionalFloat("headHeightRatio", obj.sleepPose.headHeightRatio);
+                    appendOptionalFloat("headPitchProxyDeg", obj.sleepPose.headPitchProxyDeg);
+                    appendOptionalFloat("headSideRatio", obj.sleepPose.headSideRatio);
+                    appendOptionalFloat("shoulderAngleDeg", obj.sleepPose.shoulderAngleDeg);
+                    appendOptionalFloat("headArmDistanceRatio", obj.sleepPose.headArmDistanceRatio);
+                    appendOptionalFloat("torsoAngleDeg", obj.sleepPose.torsoAngleDeg);
+                    appendOptionalFloat("headMotionRatio", obj.sleepPose.headMotionRatio);
+                    sleepPose["candidate"] = obj.sleepPose.candidate;
+                    sleepPose["sleepScore"] = obj.sleepPose.sleepScore;
+                    sleepPose["validRatio"] = obj.sleepPose.validRatio;
+                    sleepPose["positiveRatio"] = obj.sleepPose.positiveRatio;
+                    sleepPose["state"] = obj.sleepPose.state;
+                    sleepPose["transitioned"] = obj.sleepPose.transitioned;
+                    sleepPose["alert"] = obj.sleepPose.alert;
+                    sleepPose["evidence"] = obj.sleepPose.evidence;
+                    item["sleepPose"] = sleepPose;
+                }
                 item["trackId"] = obj.trackId;
                 item["ruleId"] = obj.ruleId;
                 item["customEventName"] = obj.customEventName;
@@ -2026,6 +2129,17 @@ namespace SVAAnalyzer
     {
         std::lock_guard<std::mutex> lock(mStreamTemporalMtx);
         mStreamTemporalContextMap.erase(streamCode);
+        for (auto it = mSleepPoseContextMap.begin(); it != mSleepPoseContextMap.end();)
+        {
+            if (it->second.streamCode == streamCode)
+            {
+                it = mSleepPoseContextMap.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
     }
 
     /**
@@ -2051,6 +2165,23 @@ namespace SVAAnalyzer
         
         // Run the tracker
         TemporalProcessor::updateStream(context, control, detects, timestampMs);
+
+        SleepPoseConfig sleepConfig;
+        if (resolveSleepPoseConfig(control, sleepConfig))
+        {
+            const std::string contextKey = sleepPoseContextKey(control, streamCode);
+            SleepPoseStreamContext &sleepContext = mSleepPoseContextMap[contextKey];
+            sleepContext.streamCode = streamCode;
+            sleepContext.controlCode = control.code;
+            SleepPoseProcessor::updateStream(sleepContext,
+                                             detects,
+                                             timestampMs,
+                                             sleepConfig);
+        }
+        else
+        {
+            mSleepPoseContextMap.erase(sleepPoseContextKey(control, streamCode));
+        }
     }
 
     /**

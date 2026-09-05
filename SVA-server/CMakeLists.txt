@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16.0)
 project(Analyzer)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -pthread ")
 
@@ -40,6 +42,7 @@ set(source
         Analyzer/Core/Utils/GeometryUtils.cpp
         Analyzer/Core/Algorithm.cpp
         Analyzer/Core/AlgorithmOnYolo.cpp
+        Analyzer/Core/AlgorithmOnYoloPose.cpp
         Analyzer/Core/Analyzer.cpp
         Analyzer/Core/AvPullStream.cpp
         Analyzer/Core/AvPushStream.cpp
@@ -49,6 +52,7 @@ set(source
         Analyzer/Core/GenerateAlarmVideo.cpp
         Analyzer/Core/Scheduler.cpp
         Analyzer/Core/Server.cpp
+        Analyzer/Core/SleepPoseEvaluator.cpp
         Analyzer/Core/TemporalContext.cpp
         Analyzer/Core/Worker.cpp
         Analyzer/main.cpp)
@@ -62,3 +66,28 @@ endif()
 target_link_libraries(Analyzer ${OpenCV_LIBS})
 target_link_libraries(Analyzer event curl crypto jsoncpp avformat avcodec avutil swscale swresample pthread)
 target_link_libraries(Analyzer onnxruntime) #onnxruntime
+
+option(SVA_BUILD_POSE_SMOKE_TEST "Build the standalone YOLO Pose video smoke test" ON)
+if(SVA_BUILD_POSE_SMOKE_TEST)
+  add_executable(PoseSmokeTest
+          Analyzer/Tools/PoseSmokeTest.cpp
+          Analyzer/Core/Algorithm.cpp
+          Analyzer/Core/AlgorithmOnYoloPose.cpp
+          Analyzer/Core/SleepPoseEvaluator.cpp)
+  target_include_directories(PoseSmokeTest PRIVATE Analyzer/Core)
+  if(SVA_ONNXRUNTIME_GPU)
+    target_compile_definitions(PoseSmokeTest PRIVATE SVA_ONNXRUNTIME_GPU=1)
+  else()
+    target_compile_definitions(PoseSmokeTest PRIVATE SVA_ONNXRUNTIME_GPU=0)
+  endif()
+  target_link_libraries(PoseSmokeTest ${OpenCV_LIBS} onnxruntime pthread)
+endif()
+
+if(BUILD_TESTING)
+  add_executable(SleepPoseUnitTest
+          Analyzer/Tools/SleepPoseUnitTest.cpp
+          Analyzer/Core/SleepPoseEvaluator.cpp)
+  target_include_directories(SleepPoseUnitTest PRIVATE Analyzer/Core)
+  target_link_libraries(SleepPoseUnitTest ${OpenCV_LIBS})
+  add_test(NAME SleepPoseUnitTest COMMAND SleepPoseUnitTest)
+endif()

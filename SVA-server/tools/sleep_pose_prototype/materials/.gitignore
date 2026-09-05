@@ -1,0 +1,4 @@
+raw/
+derived/
+labels/*.csv
+!labels/.gitkeep

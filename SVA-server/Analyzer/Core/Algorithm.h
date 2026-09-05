@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <opencv2/opencv.hpp> //opencv header file
 #include "TrackMetadata.h"
+#include "PoseTypes.h"
 
 namespace SVAAnalyzer
 {
@@ -52,6 +53,9 @@ namespace SVAAnalyzer
         std::string class_name;
         std::string source_algorithm;
         bool happen = false;
+        bool hasPose = false;
+        PoseKeypoints keypoints{};
+        SleepPoseAnalysis sleepPose{};
 
         // Temporal tracking (from TemporalProcessor)
         int trackId = -1;

@@ -1,0 +1,30 @@
+# Pose model and inference
+model: yolo11n-pose.pt
+image_size: 640
+detection_confidence: 0.35
+nms_iou: 0.45
+keypoint_confidence: 0.35
+
+# The Python prototype intentionally uses the same kind of simple IoU tracker as
+# easySVA-server. Replace it only if ID switches become a measured problem.
+tracker_iou_threshold: 0.30
+tracker_max_missing_sec: 1.0
+
+# Temporal decision policy. Production defaults keep short head-down actions
+# from becoming an alarm. Shorten confirm_window_sec only while debugging.
+confirm_window_sec: 15.0
+sleep_positive_ratio: 0.80
+minimum_valid_ratio: 0.60
+recovery_sec: 2.0
+
+# Per-frame posture evidence. These are starting points, not final thresholds.
+# Tune them from frame_features.csv using videos from the target camera.
+head_height_ratio_max: 0.48
+head_side_ratio_min: 0.30
+head_arm_distance_ratio_max: 0.75
+torso_angle_deg_min: 25.0
+shoulder_tilt_deg_min: 15.0
+
+# Low motion is measured as head displacement / shoulder width over this window.
+motion_window_sec: 2.0
+head_motion_ratio_max: 0.15

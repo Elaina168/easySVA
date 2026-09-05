@@ -252,7 +252,7 @@
 
             <el-form-item label="行为规则">
               <div class="behavior-rule-toolbar">
-                <span class="behavior-rule-hint">可配置跨线、进区、出区、停留、低速、徘徊、睡觉、缺席、数量阈值、占用、区域运动、定向通行、逆向通行、目标接近、目标远离；区域类规则可绑定任一区域</span>
+                <span class="behavior-rule-hint">可配置跨线、进区、出区、停留、低速、徘徊、睡岗、缺席、数量阈值、占用、区域运动、定向通行、逆向通行、目标接近、目标远离；区域类规则可绑定任一区域</span>
                 <el-button size="mini" type="primary" plain icon="el-icon-plus" @click="handleAddBehaviorRule">新增规则</el-button>
               </div>
               <div v-if="behaviorRuleList.length" class="behavior-rule-list">
@@ -1236,7 +1236,7 @@ export default {
         { value: 'dwell', label: '停留' },
         { value: 'low_speed', label: '低速' },
         { value: 'loitering', label: '徘徊' },
-        { value: 'sleep', label: '睡觉' },
+        { value: 'sleep', label: '睡岗' },
         { value: 'absence', label: '缺席' },
         { value: 'count_threshold', label: '数量阈值' },
         { value: 'occupancy', label: '占用' },
@@ -2005,6 +2005,17 @@ export default {
           logicMode: 'all',
           maxSpeedPxPerSec: 6,
           maxDisplacementPx: 48,
+          keypointConfidence: 0.35,
+          sleepPositiveRatio: 0.80,
+          minimumValidRatio: 0.60,
+          recoveryMs: 2000,
+          headHeightRatioMax: 0.48,
+          headSideRatioMin: 0.30,
+          headArmDistanceRatioMax: 0.75,
+          torsoAngleDegMin: 25,
+          shoulderTiltDegMin: 15,
+          motionWindowMs: 2000,
+          headMotionRatioMax: 0.15,
           directionAngleDeg: 0,
           directionToleranceDeg: 30,
           directionLineId: ''
@@ -2314,6 +2325,7 @@ export default {
       const directionLineId = this.normalizeBehaviorRuleDirectionLineId(behaviorType, requestedDirectionLineId, geometryConfig)
       const directionLine = directionLineId ? (geometryConfig.lines || []).find(line => line.id === directionLineId) : null
       const derivedDirectionAngleDeg = this.computeDirectionAngleFromLine(directionLine)
+      const sleepPoseConfig = this.normalizeSleepPoseRuleConfig(behaviorType, rule)
       return {
         id: rule && rule.id ? String(rule.id) : `behavior_rule_${index + 1}`,
         name: rule && rule.name ? String(rule.name) : `${behaviorType}_${index + 1}`,
@@ -2339,7 +2351,34 @@ export default {
         directionLineId,
         ruleObjectCode: specifiedRegionMode ? 'specified_region' : ruleObjectCode,
         subjectObject: specifiedRegionMode ? '' : subjectObject,
-        targetObject: specifiedRegionMode ? '' : targetObject
+        targetObject: specifiedRegionMode ? '' : targetObject,
+        ...sleepPoseConfig
+      }
+    },
+
+    normalizeSleepPoseRuleConfig(behaviorType, rule) {
+      if (behaviorType !== 'sleep') {
+        return {}
+      }
+      const source = rule || {}
+      const numberInRange = (key, fallback, min, max, integer = false) => {
+        const numeric = Number(source[key])
+        const value = Number.isFinite(numeric) ? numeric : fallback
+        const clamped = Math.min(max, Math.max(min, value))
+        return integer ? Math.round(clamped) : clamped
+      }
+      return {
+        keypointConfidence: numberInRange('keypointConfidence', 0.35, 0, 1),
+        sleepPositiveRatio: numberInRange('sleepPositiveRatio', 0.80, 0, 1),
+        minimumValidRatio: numberInRange('minimumValidRatio', 0.60, 0, 1),
+        recoveryMs: numberInRange('recoveryMs', 2000, 100, 60000, true),
+        headHeightRatioMax: numberInRange('headHeightRatioMax', 0.48, -2, 4),
+        headSideRatioMin: numberInRange('headSideRatioMin', 0.30, 0, 4),
+        headArmDistanceRatioMax: numberInRange('headArmDistanceRatioMax', 0.75, 0, 8),
+        torsoAngleDegMin: numberInRange('torsoAngleDegMin', 25, 0, 90),
+        shoulderTiltDegMin: numberInRange('shoulderTiltDegMin', 15, 0, 90),
+        motionWindowMs: numberInRange('motionWindowMs', 2000, 500, 60000, true),
+        headMotionRatioMax: numberInRange('headMotionRatioMax', 0.15, 0, 8)
       }
     },
 
@@ -2530,7 +2569,8 @@ export default {
         parts.push(`运动阈值 >= ${this.formatBehaviorRuleNumber(rule.distanceThresholdPx, 0)}%`)
       }
       if (rule.behaviorType === 'sleep') {
-        parts.push(`宽高比 >= ${this.formatBehaviorRuleNumber(rule.distanceThresholdPx)}`)
+        parts.push(`姿态候选 >= ${this.formatBehaviorRuleNumber(rule.sleepPositiveRatio * 100, 0)}%`)
+        parts.push(`有效帧 >= ${this.formatBehaviorRuleNumber(rule.minimumValidRatio * 100, 0)}%`)
       }
       if (this.isBehaviorRuleSequenceConfigVisible(rule)) {
         parts.push(`阶段 ${this.formatBehaviorRuleNumber(rule.stageIndex + 1, 0)}`)
@@ -2675,7 +2715,7 @@ export default {
         return '徘徊告警'
       }
       if (behaviorType === 'sleep') {
-        return '睡觉告警'
+        return '睡岗告警'
       }
       if (behaviorType === 'absence') {
         return '离岗/缺席告警'
@@ -2821,7 +2861,7 @@ export default {
         return `徘徊${this.formatBehaviorRuleDuration(rule.thresholdMs)}`
       }
       if (rule.behaviorType === 'sleep') {
-        return `睡觉${this.formatBehaviorRuleDuration(rule.thresholdMs)}`
+        return `睡岗${this.formatBehaviorRuleDuration(rule.thresholdMs)}`
       }
       if (rule.behaviorType === 'absence') {
         return `缺席${this.formatBehaviorRuleDuration(rule.thresholdMs)}`
@@ -4055,6 +4095,12 @@ export default {
 
     getAlgorithmThresholdDefaults(algorithmCode) {
       const code = String(algorithmCode || '').trim()
+      if (code === 'on_yolo11n_pose') {
+        return {
+          scoreThreshold: 0.35,
+          nmsThreshold: 0.45
+        }
+      }
       if (code === 'on_yolo26s_miner' || code === 'on_yolo26n_80') {
         return {
           scoreThreshold: 0.25,
@@ -4208,6 +4254,9 @@ export default {
       const matched = this.algorithmOptions.find(item => item.code === code)
       task.algorithmName = matched ? matched.name : ''
       this.applyAlgorithmTaskThresholdDefaults(task, { force: true })
+      if (code === 'on_yolo11n_pose') {
+        task.detectFps = 5
+      }
       task.targetCodes = []
       await this.loadTargetOptionsForTask(task, code)
       this.clearAlgorithmTasksValidation()

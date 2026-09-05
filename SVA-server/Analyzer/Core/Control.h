@@ -103,6 +103,17 @@ namespace SVAAnalyzer
 		double maxDisplacementPx = 0.0;
 		double directionAngleDeg = 0.0;
 		double directionToleranceDeg = 30.0;
+		double keypointConfidence = 0.35;
+		double sleepPositiveRatio = 0.80;
+		double minimumValidRatio = 0.60;
+		int64_t recoveryMs = 2000;
+		double headHeightRatioMax = 0.48;
+		double headSideRatioMin = 0.30;
+		double headArmDistanceRatioMax = 0.75;
+		double torsoAngleDegMin = 25.0;
+		double shoulderTiltDegMin = 15.0;
+		int64_t motionWindowMs = 2000;
+		double headMotionRatioMax = 0.15;
 		std::string sequenceId;
 		int stageIndex = 0;
 		int64_t stageTimeoutMs = 0;
@@ -784,6 +795,51 @@ namespace SVAAnalyzer
 				{
 					rule.maxDisplacementPx = displacementThreshold;
 				}
+				double poseParameter = 0.0;
+				if (tryParseJsonNumber(item["keypointConfidence"], poseParameter))
+				{
+					rule.keypointConfidence = poseParameter;
+				}
+				if (tryParseJsonNumber(item["sleepPositiveRatio"], poseParameter))
+				{
+					rule.sleepPositiveRatio = poseParameter;
+				}
+				if (tryParseJsonNumber(item["minimumValidRatio"], poseParameter))
+				{
+					rule.minimumValidRatio = poseParameter;
+				}
+				if (tryParseJsonNumber(item["recoveryMs"], poseParameter))
+				{
+					rule.recoveryMs = static_cast<int64_t>(poseParameter);
+				}
+				if (tryParseJsonNumber(item["headHeightRatioMax"], poseParameter))
+				{
+					rule.headHeightRatioMax = poseParameter;
+				}
+				if (tryParseJsonNumber(item["headSideRatioMin"], poseParameter))
+				{
+					rule.headSideRatioMin = poseParameter;
+				}
+				if (tryParseJsonNumber(item["headArmDistanceRatioMax"], poseParameter))
+				{
+					rule.headArmDistanceRatioMax = poseParameter;
+				}
+				if (tryParseJsonNumber(item["torsoAngleDegMin"], poseParameter))
+				{
+					rule.torsoAngleDegMin = poseParameter;
+				}
+				if (tryParseJsonNumber(item["shoulderTiltDegMin"], poseParameter))
+				{
+					rule.shoulderTiltDegMin = poseParameter;
+				}
+				if (tryParseJsonNumber(item["motionWindowMs"], poseParameter))
+				{
+					rule.motionWindowMs = static_cast<int64_t>(poseParameter);
+				}
+				if (tryParseJsonNumber(item["headMotionRatioMax"], poseParameter))
+				{
+					rule.headMotionRatioMax = poseParameter;
+				}
 				if (item["sequenceId"].isString())
 				{
 					rule.sequenceId = item["sequenceId"].asString();
@@ -1053,6 +1109,17 @@ namespace SVAAnalyzer
 						rule.maxSpeedPxPerSec = std::max(0.1, std::min(10000.0, rule.maxSpeedPxPerSec > 0.0 ? rule.maxSpeedPxPerSec : 6.0));
 						rule.maxDisplacementPx = std::max(1.0, std::min(10000.0, rule.maxDisplacementPx > 0.0 ? rule.maxDisplacementPx : 48.0));
 						rule.distanceThresholdPx = std::max(0.5, std::min(8.0, rule.distanceThresholdPx > 0.0 ? rule.distanceThresholdPx : 1.2));
+						rule.keypointConfidence = std::max(0.0, std::min(1.0, rule.keypointConfidence));
+						rule.sleepPositiveRatio = std::max(0.0, std::min(1.0, rule.sleepPositiveRatio));
+						rule.minimumValidRatio = std::max(0.0, std::min(1.0, rule.minimumValidRatio));
+						rule.recoveryMs = std::max<int64_t>(100, std::min<int64_t>(60000, rule.recoveryMs));
+						rule.headHeightRatioMax = std::max(-2.0, std::min(4.0, rule.headHeightRatioMax));
+						rule.headSideRatioMin = std::max(0.0, std::min(4.0, rule.headSideRatioMin));
+						rule.headArmDistanceRatioMax = std::max(0.0, std::min(8.0, rule.headArmDistanceRatioMax));
+						rule.torsoAngleDegMin = std::max(0.0, std::min(90.0, rule.torsoAngleDegMin));
+						rule.shoulderTiltDegMin = std::max(0.0, std::min(90.0, rule.shoulderTiltDegMin));
+						rule.motionWindowMs = std::max<int64_t>(500, std::min<int64_t>(60000, rule.motionWindowMs));
+						rule.headMotionRatioMax = std::max(0.0, std::min(8.0, rule.headMotionRatioMax));
 					}
 					else if (rule.behaviorType == "count_threshold")
 					{

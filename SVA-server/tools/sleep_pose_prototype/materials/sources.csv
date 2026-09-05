@@ -1,0 +1,9 @@
+id,proposed_label,source_url,purpose,license,redistribute_raw
+P01,sleep,https://www.pexels.com/video/a-woman-sleeping-on-her-work-desk-9063074/,single-person desk sleep,Pexels License,no
+P02,sleep,https://www.pexels.com/video/a-woman-is-laying-on-top-of-a-laptop-27430396/,multi-person and occlusion,Pexels License,no
+P03,sleep,https://www.pexels.com/video/a-tired-woman-sleeping-on-a-table-7882756/,head near arm,Pexels License,no
+P04,review,https://www.pexels.com/video/a-man-resting-on-his-desk-6615306/,ambiguous tired-to-rest boundary,Pexels License,no
+N01,normal,https://www.pexels.com/video/focused-office-worker-writing-at-desk-31183723/,writing hard negative,Pexels License,no
+N02,normal,https://www.pexels.com/video/woman-using-a-phone-8439809/,phone-use hard negative,Pexels License,no
+N03,normal,https://www.pexels.com/video/a-woman-reading-a-document-while-sitting-on-a-desk-7660704/,reading hard negative,Pexels License,no
+N04,normal,https://www.pexels.com/video/man-reading-a-document-shaking-his-head-8731303/,hand-near-head and motion hard negative,Pexels License,no
