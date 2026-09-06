@@ -103,14 +103,28 @@ export default {
           type: 'flv',
           url: url,
           cors: true,
-          hasAudio: false,
+          hasAudio: false
+        }, {
           enableWorker: false,
           enableStashBuffer: false,
-          stashInitialSize: 128
+          stashInitialSize: 128,
+          autoCleanupSourceBuffer: true,
+          autoCleanupMaxBackwardDuration: 15,
+          autoCleanupMinBackwardDuration: 5
         });
         this.flvPlayer.attachMediaElement(videoElement);
         this.flvPlayer.load();
         this.flvPlayer.play().catch(() => {});
+
+        this.flvPlayer.on(flvjs.Events.ERROR, (errType, errDetail) => {
+          console.warn('[RTSPPlayer] FLV error:', errType, errDetail);
+          if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = setTimeout(() => {
+            if (this.viewProof && this.rtspUrl) {
+              this.initFLVPlayer();
+            }
+          }, 1200);
+        });
       }
     },
 

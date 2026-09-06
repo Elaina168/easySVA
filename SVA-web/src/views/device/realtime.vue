@@ -475,7 +475,10 @@ export default {
           }, {
             enableWorker: false,
             lazyLoad: false,
-            stashInitialSize: 128
+            stashInitialSize: 128,
+            autoCleanupSourceBuffer: true,
+            autoCleanupMaxBackwardDuration: 15,
+            autoCleanupMinBackwardDuration: 5
           })
           player.attachMediaElement(videoElement)
           player.load()
@@ -483,24 +486,19 @@ export default {
           if (playPromise !== undefined) {
             playPromise.catch(() => {})
           }
-          let retryCount = 0
+          let retryTimer = null
+          const reconnect = () => {
+            if (slot.playUrl !== url) return
+            if (retryTimer) clearTimeout(retryTimer)
+            retryTimer = setTimeout(() => {
+              if (slot.playUrl === url) {
+                this.initSlotPlayer(index, url)
+              }
+            }, 1200)
+          }
           player.on(flvjs.Events.ERROR, (errType, errDetail) => {
             console.warn(`[Realtime slot ${index}] FLV error:`, errType, errDetail)
-            if (retryCount < 2) {
-              retryCount += 1
-              setTimeout(() => {
-                if (slot.playUrl === url && slot.flvPlayer) {
-                  try {
-                    slot.flvPlayer.unload()
-                    slot.flvPlayer.load()
-                    const p = slot.flvPlayer.play()
-                    if (p) p.catch(() => {})
-                  } catch (e) {}
-                }
-              }, 1500)
-              return
-            }
-            slot.error = '视频流断开或暂未推流'
+            reconnect()
           })
           slot.flvPlayer = player
         } catch (err) {
