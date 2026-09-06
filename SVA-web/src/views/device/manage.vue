@@ -76,6 +76,15 @@
           v-hasPermi="['waring:device:remove']"
         >删除</el-button>
       </el-col>
+      <el-col :span="1.5">
+        <el-button
+          type="warning"
+          plain
+          icon="el-icon-video-camera"
+          size="mini"
+          @click="goToRealtime()"
+        >实时监控中心</el-button>
+      </el-col>
     </el-row>
 
     <el-table v-loading="loading" :data="deviceList" @selection-change="handleSelectionChange">
@@ -100,7 +109,7 @@
           <span>{{ renderOnline(scope.row.is_online) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" align="center" fixed="right" class-name="small-padding fixed-width operation-column" width="410">
+      <el-table-column label="操作" align="center" fixed="right" class-name="small-padding fixed-width operation-column" width="460">
         <template slot-scope="scope">
           <el-button
             size="mini"
@@ -116,6 +125,13 @@
             @click="stopMonitor(scope.row)"
             v-hasPermi="['waring:device:stop']"
           >停止监控</el-button>
+          <el-button
+            size="mini"
+            type="text"
+            icon="el-icon-monitor"
+            style="color: #e6a23c;"
+            @click="goToRealtime(scope.row)"
+          >进入监控</el-button>
           <el-button
             size="mini"
             type="text"
@@ -562,11 +578,21 @@ export default {
         this.$modal.msgSuccess('删除成功')
       }).catch(() => {})
     },
+    goToRealtime(row) {
+      const query = {}
+      if (row) {
+        const apeId = row.ape_id || row.apeId || row.deviceId || row.device_id
+        if (apeId) {
+          query.ape_id = apeId
+        }
+      }
+      this.$router.push({ path: '/video/realtime', query })
+    },
     async startMonitor(row) {
       try {
         const response = await startDeviceMonitor(row.ape_id)
         const payload = response && response.data && typeof response.data === 'object' ? response.data : {}
-        const shortMessage = payload.shortMessage || '已启动监控，请到“实时监控”菜单继续操作。'
+        const shortMessage = payload.shortMessage || '已启动监控，可点击“进入监控”或前往“实时监控”查看画面。'
         const hasSuccess = Object.prototype.hasOwnProperty.call(payload, 'success')
         this.$message({
           type: hasSuccess && !payload.success ? 'warning' : 'success',
@@ -604,14 +630,27 @@ export default {
         this.$modal.msgError('设备编码不存在，无法预览')
         return
       }
-      const response = await previewDeviceMonitor(apeId)
-      const playUrl = this.extractPreviewUrl(response)
-      if (!playUrl) {
-        this.$modal.msgWarning('暂无可播放地址，请先启动监控后重试')
-        return
+      try {
+        const response = await previewDeviceMonitor(apeId)
+        let playUrl = this.extractPreviewUrl(response)
+        if (!playUrl) {
+          playUrl = row.play_url || row.direct_source_url || ''
+        }
+        if (!playUrl) {
+          this.$modal.msgWarning('暂无可播放地址，请先配置视频流地址或启动监控后重试')
+          return
+        }
+        this.rtspUrl = playUrl
+        this.viewProof = true
+      } catch (e) {
+        const playUrl = row.play_url || row.direct_source_url
+        if (playUrl) {
+          this.rtspUrl = playUrl
+          this.viewProof = true
+        } else {
+          this.$modal.msgWarning('获取预览流地址失败，请检查设备配置')
+        }
       }
-      this.rtspUrl = playUrl
-      this.viewProof = true
     },
     warningHistory(row) {
       this.device_id = row.ape_id || row.apeId || row.place
