@@ -483,7 +483,23 @@ export default {
           if (playPromise !== undefined) {
             playPromise.catch(() => {})
           }
-          player.on(flvjs.Events.ERROR, () => {
+          let retryCount = 0
+          player.on(flvjs.Events.ERROR, (errType, errDetail) => {
+            console.warn(`[Realtime slot ${index}] FLV error:`, errType, errDetail)
+            if (retryCount < 2) {
+              retryCount += 1
+              setTimeout(() => {
+                if (slot.playUrl === url && slot.flvPlayer) {
+                  try {
+                    slot.flvPlayer.unload()
+                    slot.flvPlayer.load()
+                    const p = slot.flvPlayer.play()
+                    if (p) p.catch(() => {})
+                  } catch (e) {}
+                }
+              }, 1500)
+              return
+            }
             slot.error = '视频流断开或暂未推流'
           })
           slot.flvPlayer = player
@@ -527,11 +543,17 @@ export default {
     },
     retrySlot(index) {
       const slot = this.slotsData[index]
-      if (!slot || !slot.deviceId) return
+      if (!slot) return
+      this.currentSlotIndex = index
+      slot.error = ''
+      slot.loading = true
       const matched = this.deviceList.find(d => this.getApeId(d) === slot.deviceId)
       if (matched) {
-        this.currentSlotIndex = index
         this.playDeviceInActiveSlot(matched)
+      } else if (slot.playUrl) {
+        this.initSlotPlayer(index, slot.playUrl)
+      } else {
+        slot.loading = false
       }
     },
     snapshotSlot(index) {
