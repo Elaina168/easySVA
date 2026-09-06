@@ -342,9 +342,17 @@ void api_control(struct evhttp_request *req, void *arg)
     {
 
         Control *control = NULL;
+        std::string code;
         if (root["code"].isString())
         {
-            std::string code = root["code"].asCString();
+            code = root["code"].asString();
+        }
+        else if (root["controlCode"].isString())
+        {
+            code = root["controlCode"].asString();
+        }
+        if (!code.empty())
+        {
             control = scheduler->apiControl(code);
         }
 
@@ -452,12 +460,31 @@ void api_control_add(struct evhttp_request *req, void *arg)
 
         Control control;
 
-        control.code = root["code"].asCString();
+        if (root["code"].isString())
+        {
+            control.code = root["code"].asString();
+        }
+        else if (root["controlCode"].isString())
+        {
+            control.code = root["controlCode"].asString();
+        }
 
-        control.streamCode = root["streamCode"].asString();
-        control.streamApp = root["streamApp"].asString();
-        control.streamName = root["streamName"].asString();
-        control.streamUrl = root["streamUrl"].asString();
+        if (root["streamCode"].isString())
+        {
+            control.streamCode = root["streamCode"].asString();
+        }
+        if (root["streamApp"].isString())
+        {
+            control.streamApp = root["streamApp"].asString();
+        }
+        if (root["streamName"].isString())
+        {
+            control.streamName = root["streamName"].asString();
+        }
+        if (root["streamUrl"].isString())
+        {
+            control.streamUrl = root["streamUrl"].asString();
+        }
         if (root.isMember("streamProtocol") && root["streamProtocol"].isString())
         {
             control.streamProtocol = root["streamProtocol"].asString();
@@ -467,8 +494,14 @@ void api_control_add(struct evhttp_request *req, void *arg)
             control.streamProtocol = (control.streamUrl.rfind("gb28181://", 0) == 0 || control.streamUrl.rfind("gb://", 0) == 0)
                 ? "gb28181" : "rtsp";
         }
-        control.pushStream = root["pushStream"].asBool();
-        control.pushStreamUrl = root["pushStreamUrl"].asString();
+        if (root["pushStream"].isBool())
+        {
+            control.pushStream = root["pushStream"].asBool();
+        }
+        if (root["pushStreamUrl"].isString())
+        {
+            control.pushStreamUrl = root["pushStreamUrl"].asString();
+        }
         if (root["renderMode"].isString())
         {
             control.renderMode = root["renderMode"].asString();
@@ -695,12 +728,24 @@ void api_control_add(struct evhttp_request *req, void *arg)
             }
         }
 
-        control.algorithmCode = root["algorithmCode"].asString();
-        control.api_url = root["api_url"].asString();
-        control.object_str = root["object_str"].asString();
-        control.objects_v1 = split(control.object_str, ",");
-        control.objects_v1_len = control.objects_v1.size();
-        control.objectCode = root["objectCode"].asString();
+        if (root["algorithmCode"].isString())
+        {
+            control.algorithmCode = root["algorithmCode"].asString();
+        }
+        if (root["api_url"].isString())
+        {
+            control.api_url = root["api_url"].asString();
+        }
+        if (root["object_str"].isString())
+        {
+            control.object_str = root["object_str"].asString();
+            control.objects_v1 = split(control.object_str, ",");
+            control.objects_v1_len = control.objects_v1.size();
+        }
+        if (root["objectCode"].isString())
+        {
+            control.objectCode = root["objectCode"].asString();
+        }
         control.objectCodes = parseStringList(root["objectCodes"]);
         if (control.objectCodes.empty() && root["objectCode"].isString())
         {
@@ -708,7 +753,10 @@ void api_control_add(struct evhttp_request *req, void *arg)
         }
         control.objectCodes = Control::normalizeObjectClassValues(control.objectCodes);
         control.objectCode = control.getPrimaryObjectCode();
-        control.recognitionRegion = root["recognitionRegion"].asString();
+        if (root["recognitionRegion"].isString())
+        {
+            control.recognitionRegion = root["recognitionRegion"].asString();
+        }
 
         if (root["algorithmTasks"].isArray())
         {
@@ -1005,7 +1053,11 @@ void api_control_cancel(struct evhttp_request *req, void *arg)
 
         if (root["code"].isString())
         {
-            control.code = root["code"].asCString();
+            control.code = root["code"].asString();
+        }
+        else if (root["controlCode"].isString())
+        {
+            control.code = root["controlCode"].asString();
         }
         if (control.validateCancel(result_msg))
         {

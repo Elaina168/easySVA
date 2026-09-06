@@ -77,11 +77,6 @@ namespace SVAAnalyzer
 
         for (int attempt = 1; attempt <= maxAttempts; ++attempt)
         {
-            if (mWorker && !mWorker->getState())
-            {
-                return false;
-            }
-
             mFmtCtx = avformat_alloc_context();
 
             AVDictionary *fmt_options = NULL;
