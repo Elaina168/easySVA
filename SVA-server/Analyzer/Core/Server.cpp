@@ -1,4 +1,4 @@
-﻿#include "Server.h"
+#include "Server.h"
 
 #ifdef WIN32
 #pragma comment(lib, "ws2_32.lib")
@@ -267,6 +267,7 @@ void api_controls(struct evhttp_request *req, void *arg)
 
                 result_data_item["code"] = controls[i]->code.data();
                 result_data_item["streamUrl"] = controls[i]->streamUrl.data();
+                result_data_item["streamProtocol"] = controls[i]->streamProtocol.data();
 
                 result_data_item["pushStream"] = controls[i]->pushStream;
                 result_data_item["pushStreamUrl"] = controls[i]->pushStreamUrl.data();
@@ -457,6 +458,15 @@ void api_control_add(struct evhttp_request *req, void *arg)
         control.streamApp = root["streamApp"].asString();
         control.streamName = root["streamName"].asString();
         control.streamUrl = root["streamUrl"].asString();
+        if (root.isMember("streamProtocol") && root["streamProtocol"].isString())
+        {
+            control.streamProtocol = root["streamProtocol"].asString();
+        }
+        if (control.streamProtocol.empty())
+        {
+            control.streamProtocol = (control.streamUrl.rfind("gb28181://", 0) == 0 || control.streamUrl.rfind("gb://", 0) == 0)
+                ? "gb28181" : "rtsp";
+        }
         control.pushStream = root["pushStream"].asBool();
         control.pushStreamUrl = root["pushStreamUrl"].asString();
         if (root["renderMode"].isString())

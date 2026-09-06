@@ -1,4 +1,4 @@
-﻿#include "Scheduler.h"
+#include "Scheduler.h"
 #include "Config.h"
 #include "Control.h"
 #include "Worker.h"
@@ -224,18 +224,40 @@ namespace SVAAnalyzer
         on_yolo26n_80 = new AlgorithmOnYolo(mConfig, modelPath, classNames, "on_yolo26n_80");
 
         int loadedModelCount = 2;
-        modelPath = mConfig->modelDir + "/yolo11n-pose.onnx";
+        std::string selectedPoseModel = mConfig->sleepModelFile.empty() ? "yolo11n-pose.onnx" : mConfig->sleepModelFile;
+        modelPath = mConfig->modelDir + "/" + selectedPoseModel;
         std::ifstream poseModel(modelPath, std::ios::binary);
-        if (poseModel.good())
+        if (!poseModel.good())
+        {
+            std::vector<std::string> candidates = {"yolo11n-pose.onnx", "sleep_yolopose.onnx"};
+            for (const auto &cand : candidates)
+            {
+                std::string testPath = mConfig->modelDir + "/" + cand;
+                std::ifstream testFile(testPath, std::ios::binary);
+                if (testFile.good())
+                {
+                    testFile.close();
+                    modelPath = testPath;
+                    break;
+                }
+            }
+        }
+        else
         {
             poseModel.close();
-            LOGI("初始化 on_yolo11n_pose (yolo11n-pose.onnx)");
+        }
+
+        std::ifstream finalCheck(modelPath, std::ios::binary);
+        if (finalCheck.good())
+        {
+            finalCheck.close();
+            LOGI("初始化 on_yolo11n_pose / sleep_yolopose (%s)", modelPath.c_str());
             on_yolo11n_pose = new AlgorithmOnYoloPose(mConfig, modelPath, "on_yolo11n_pose");
             ++loadedModelCount;
         }
         else
         {
-            LOGI("跳过 on_yolo11n_pose，模型不存在: %s", modelPath.c_str());
+            LOGI("跳过 on_yolo11n_pose / sleep_yolopose，模型未安装: %s", modelPath.c_str());
         }
 
         LOGI("initAlgorithm() end - total ONNX models loaded: %d", loadedModelCount);

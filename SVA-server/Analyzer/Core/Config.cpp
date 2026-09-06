@@ -1,4 +1,4 @@
-﻿#include "Config.h"
+#include "Config.h"
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -39,6 +39,10 @@ namespace SVAAnalyzer
 
                 this->uploadDir = root["uploadDir"].asString();
                 this->modelDir = root["modelDir"].asString();
+                if (root.isMember("sleepModelFile") && root["sleepModelFile"].isString() && !root["sleepModelFile"].asString().empty())
+                {
+                    this->sleepModelFile = root["sleepModelFile"].asString();
+                }
 
                 std::filesystem::path path(uploadDir);
                 try
@@ -80,5 +84,6 @@ namespace SVAAnalyzer
 
         printf("config.uploadDir=%s\n", uploadDir.data());
         printf("config.modelDir=%s\n", modelDir.data());
+        printf("config.sleepModelFile=%s\n", sleepModelFile.data());
     }
 }

@@ -1,4 +1,4 @@
-﻿#ifndef ANALYZER_CONTROL_H
+#ifndef ANALYZER_CONTROL_H
 #define ANALYZER_CONTROL_H
 
 #include <string>
@@ -130,6 +130,7 @@ namespace SVAAnalyzer
 		std::string streamApp;	// 视频流app
 		std::string streamName; // 视频流name
 		std::string streamUrl;	// 拉流地址
+		std::string streamProtocol = "rtsp"; // rtsp/gb28181
 
 		bool pushStream = false;   // 是否推流
 		std::string pushStreamUrl; // 推流地址
