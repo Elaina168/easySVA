@@ -104,9 +104,18 @@
       <el-table-column label="组织编码" prop="org_index" align="center" :show-overflow-tooltip="true" />
       <el-table-column label="组织名称" prop="org_name" align="center" :show-overflow-tooltip="true" />
       <el-table-column label="位置" prop="place" align="center" :show-overflow-tooltip="true" />
-      <el-table-column label="在线状态" prop="is_online" align="center">
+      <el-table-column label="在线状态" prop="is_online" align="center" width="100">
         <template slot-scope="scope">
-          <span>{{ renderOnline(scope.row.is_online) }}</span>
+          <el-tag size="mini" :type="String(scope.row.is_online) === '1' ? 'success' : 'info'">
+            {{ renderOnline(scope.row.is_online) }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="监控状态" prop="monitor_status" align="center" width="100">
+        <template slot-scope="scope">
+          <el-tag size="mini" :type="scope.row.monitor_status === 'RUNNING' ? 'success' : 'info'">
+            {{ scope.row.monitor_status === 'RUNNING' ? '监控中' : '已停止' }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" align="center" fixed="right" class-name="small-padding fixed-width operation-column" width="460">
@@ -598,6 +607,7 @@ export default {
           type: hasSuccess && !payload.success ? 'warning' : 'success',
           message: shortMessage
         })
+        this.getList()
       } catch (error) {
         this.$modal.msgError((error && error.message) || '启动监控失败，请稍后重试')
       }
@@ -613,6 +623,7 @@ export default {
           type: isFailed ? 'warning' : 'success',
           message: shortMessage
         })
+        this.getList()
       } catch (error) {
         this.$modal.msgError((error && error.message) || '停止监控失败，请稍后重试')
       }
