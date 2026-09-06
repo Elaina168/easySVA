@@ -70,6 +70,10 @@ export default {
       return /^rtsp:\/\//i.test(url || '');
     },
 
+    isGbUrl(url) {
+      return /^(gb28181|gb):\/\//i.test(url || '');
+    },
+
     isHttpMediaUrl(url) {
       return /^(https?:\/\/|wss?:\/\/|\/)/i.test(url || '');
     },
@@ -97,11 +101,16 @@ export default {
         this.flvPlayer = flvjs.createPlayer({
           isLive: true,
           type: 'flv',
-          url: url
+          url: url,
+          cors: true,
+          hasAudio: false,
+          enableWorker: false,
+          enableStashBuffer: false,
+          stashInitialSize: 128
         });
         this.flvPlayer.attachMediaElement(videoElement);
         this.flvPlayer.load();
-        this.flvPlayer.play();
+        this.flvPlayer.play().catch(() => {});
       }
     },
 
@@ -119,12 +128,22 @@ export default {
         return;
       }
 
+      const currentHost = window.location.hostname || 'localhost';
+
+      if (this.isGbUrl(this.rtspUrl)) {
+        const gbMatches = this.rtspUrl.match(/^(?:gb28181|gb):\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i);
+        const url = gbMatches
+          ? `http://${currentHost}:9992/${gbMatches[1]}/${gbMatches[2]}.live.flv`
+          : `http://${currentHost}:9992/live/acceptance.live.flv`;
+        this.playFlvMedia(url);
+        return;
+      }
+
       if (!this.isRtspUrl(this.rtspUrl)) {
         if (this.flvPlayer != null) this.closeFLVPlayer(true);
         return;
       }
 
-      const currentHost = window.location.hostname || 'localhost';
       let url = this.rtspUrl;
       const rtspMatches = url.match(/^rtsp:\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i);
       if (rtspMatches) {
