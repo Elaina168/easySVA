@@ -87,6 +87,7 @@
 import flvjs from 'flv.js'
 import WarningHistory from './warning-history.vue'
 import { getDeploymentDetail } from '@/api/deployment'
+import { getDeviceList } from '@/api/device'
 import { getScreenWallStreams, normalizeScreenWallStream } from '@/api/screenWall'
 import { OVERLAY_DELAY_DEFAULT_MS, loadOverlayDelayMs } from '@/utils/systemRuntimeConfig'
 
@@ -301,6 +302,30 @@ export default {
           return aIndex - bIndex
         })
         .slice(0, this.maxStreams)
+
+      if (basicStreams.length === 0) {
+        try {
+          const devResp = await getDeviceList({ pageNum: 1, pageSize: this.maxStreams })
+          const devRows = (devResp && devResp.rows) || []
+          const fallbackStreams = devRows
+            .filter(d => d.direct_source_url || d.play_url)
+            .map((d, idx) => ({
+              id: d.id || d.ape_id,
+              sourceId: d.ape_id,
+              sourceType: 'device',
+              deviceId: d.ape_id,
+              name: d.name || d.ape_id,
+              slotIndex: idx,
+              playUrl: d.play_url || d.direct_source_url
+            }))
+            .slice(0, this.maxStreams)
+          if (fallbackStreams.length > 0) {
+            return Promise.all(fallbackStreams.map(stream => this.enrichWallStream(stream)))
+          }
+        } catch (e) {
+          console.warn('Fallback to device list failed', e)
+        }
+      }
 
       return Promise.all(basicStreams.map(stream => this.enrichWallStream(stream)))
     },

@@ -124,24 +124,36 @@ export default {
         return;
       }
 
-      const url = `ws://192.168.125.30:9117/rtsp?url=${btoa(this.rtspUrl)}`;
+      const currentHost = window.location.hostname || 'localhost';
+      let url = this.rtspUrl;
+      const rtspMatches = url.match(/^rtsp:\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i);
+      if (rtspMatches) {
+        url = `http://${currentHost}:9992/${rtspMatches[1]}/${rtspMatches[2]}.live.flv`;
+      } else {
+        url = `http://${currentHost}:9992/live/acceptance.live.flv`;
+      }
+
       // 销毁
       if (this.flvPlayer != null) this.closeFLVPlayer(true);
 
       if (flvjs.isSupported()) {
-        console.log("正在加载播放器……");
+        console.log("正在加载播放器……", url);
         this.flvPlayer = flvjs.createPlayer({
           isLive: true,
           type: 'flv',
           url: url,
-          enableWorker: true,
+          cors: true,
+          enableWorker: false,
           enableStashBuffer: false,
           stashInitialSize: 128
         });
 
         this.flvPlayer.attachMediaElement(videoElement);
         this.flvPlayer.load();
-        this.flvPlayer.play();
+        const playPromise = this.flvPlayer.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {});
+        }
         this.flvPlayer.muted = false; // 确保新播放器不是静音状态
       }
     },
