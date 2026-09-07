@@ -99,6 +99,7 @@
 import { getDeploymentDetail, listDeployments, startDeployment, stopDeployment } from '@/api/deployment'
 import { previewDeviceMonitor } from '@/api/device'
 import { upsertScreenWallStream } from '@/api/screenWall'
+import { extractPlayableUrl, isBrowserPlayableUrl } from '@/utils/mediaPlayback'
 
 export default {
   name: 'DeploymentIndex',
@@ -162,19 +163,13 @@ export default {
       }
       return Boolean(value)
     },
-    extractPlayUrl(source) {
-      if (!source) {
-        return ''
-      }
-      return source.playUrl || source.play_url || source.devicePlayUrl || source.device_play_url || source.previewUrl || source.preview_url || source.url || source.streamUrl || source.stream_url || source.rtspUrl || source.flvUrl || source.directSourceUrl || source.direct_source_url || source.liveUrl || source.live_url || ''
-    },
     async resolveDevicePreviewPlayUrl(deviceId) {
       if (!deviceId) {
         return ''
       }
       try {
         const response = await previewDeviceMonitor(deviceId)
-        return this.extractPlayUrl((response && response.data) || response)
+        return extractPlayableUrl(response)
       } catch (error) {
         return ''
       }
@@ -262,17 +257,13 @@ export default {
       const slotIndex = this.getFieldValue(detail, 'slotIndex', 'slot_index')
       const fallbackSlotIndex = this.getFieldValue(row, 'slotIndex', 'slot_index')
       const taskPushEnabled = this.toBoolean(this.getFieldValue(detail, 'taskPushEnabled', 'task_push_enabled', 'pushEnabled', 'push_enabled'), false)
-      const algorithmStreamUrl = this.getFieldValue(detail, 'algorithmStreamUrl', 'algorithm_stream_url') || this.getFieldValue(row, 'algorithmStreamUrl', 'algorithm_stream_url') || ''
+      const algorithmStreamUrl = extractPlayableUrl(this.getFieldValue(detail, 'algorithmStreamUrl', 'algorithm_stream_url') || this.getFieldValue(row, 'algorithmStreamUrl', 'algorithm_stream_url') || '')
       let playUrl = ''
 
-      if (taskPushEnabled && algorithmStreamUrl) {
+      if (taskPushEnabled && isBrowserPlayableUrl(algorithmStreamUrl)) {
         playUrl = algorithmStreamUrl
       } else {
         playUrl = await this.resolveDevicePreviewPlayUrl(deviceId)
-      }
-
-      if (!playUrl) {
-        playUrl = this.extractPlayUrl(detail) || this.extractPlayUrl(row)
       }
 
       return {
@@ -340,8 +331,8 @@ export default {
         this.$modal.msgWarning('缺少任务ID，无法加入监控墙')
         return
       }
-      if (!payload.playUrl) {
-        this.$modal.msgWarning('缺少设备 playUrl，无法加入监控墙')
+      if (!isBrowserPlayableUrl(payload.playUrl)) {
+        this.$modal.msgWarning('缺少可用播放地址，无法加入监控墙')
         return
       }
       await upsertScreenWallStream(payload)

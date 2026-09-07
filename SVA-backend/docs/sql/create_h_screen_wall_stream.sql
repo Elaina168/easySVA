@@ -12,7 +12,7 @@
 CREATE TABLE IF NOT EXISTS `h_screen_wall_stream` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `wall_code` varchar(64) NOT NULL DEFAULT 'main' COMMENT '监控墙编码',
-  `source_type` varchar(32) NOT NULL DEFAULT 'task' COMMENT '源类型(task/device/realtime)',
+  `source_type` varchar(32) NOT NULL DEFAULT 'task' COMMENT '源类型(task/realtime)',
   `source_id` varchar(64) NOT NULL COMMENT '源业务ID',
   `device_id` varchar(64) DEFAULT NULL COMMENT '设备ID/编码',
   `play_url` varchar(1024) DEFAULT NULL COMMENT '播放地址',
@@ -63,6 +63,6 @@ ON DUPLICATE KEY UPDATE
 
 INSERT INTO h_screen_wall_stream
   (wall_code, source_type, source_id, device_id, play_url, title, slot_index, enabled, create_time, update_time)
-SELECT 'main', 'device', 'acceptance-camera', 'acceptance-camera', 'http://127.0.0.1:9992/live/acceptance.live.flv', '验收测试摄像头', 0, 1, NOW(), NOW()
+SELECT 'main', 'realtime', 'acceptance-camera', 'acceptance-camera', 'http://127.0.0.1:9992/live/acceptance.live.flv', '验收测试摄像头', 0, 1, NOW(), NOW()
 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM h_screen_wall_stream WHERE wall_code = 'main' AND slot_index = 0);

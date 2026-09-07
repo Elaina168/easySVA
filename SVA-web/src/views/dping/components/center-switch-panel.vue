@@ -87,9 +87,10 @@
 import flvjs from 'flv.js'
 import WarningHistory from './warning-history.vue'
 import { getDeploymentDetail } from '@/api/deployment'
-import { getDeviceList } from '@/api/device'
+import { getDeviceList, previewDeviceMonitor } from '@/api/device'
 import { getScreenWallStreams, normalizeScreenWallStream } from '@/api/screenWall'
 import { OVERLAY_DELAY_DEFAULT_MS, loadOverlayDelayMs } from '@/utils/systemRuntimeConfig'
+import { extractPlayableUrl, isBrowserPlayableUrl, isFlvUrl } from '@/utils/mediaPlayback'
 
 export default {
   name: 'CenterSwitchPanel',
@@ -295,7 +296,11 @@ export default {
             playUrl: normalized.playUrl || item.playUrl || item.play_url || ''
           }
         })
-        .filter(item => item.enabled !== false && item.playUrl)
+        .filter(item => (
+          item.enabled !== false
+          && (item.sourceType === 'task' || item.sourceType === 'realtime')
+          && isBrowserPlayableUrl(item.playUrl)
+        ))
         .sort((a, b) => {
           const aIndex = Number.isFinite(Number(a.slotIndex)) ? Number(a.slotIndex) : Number.MAX_SAFE_INTEGER
           const bIndex = Number.isFinite(Number(b.slotIndex)) ? Number(b.slotIndex) : Number.MAX_SAFE_INTEGER
@@ -307,18 +312,29 @@ export default {
         try {
           const devResp = await getDeviceList({ pageNum: 1, pageSize: this.maxStreams })
           const devRows = (devResp && devResp.rows) || []
-          const fallbackStreams = devRows
-            .filter(d => d.direct_source_url || d.play_url)
-            .map((d, idx) => ({
-              id: d.id || d.ape_id,
-              sourceId: d.ape_id,
-              sourceType: 'device',
-              deviceId: d.ape_id,
-              name: d.name || d.ape_id,
-              slotIndex: idx,
-              playUrl: d.play_url || d.direct_source_url
-            }))
-            .slice(0, this.maxStreams)
+          const fallbackStreams = (await Promise.all(devRows.slice(0, this.maxStreams).map(async (d, idx) => {
+            const apeId = d.ape_id
+            if (!apeId) {
+              return null
+            }
+            try {
+              const playUrl = extractPlayableUrl(await previewDeviceMonitor(apeId))
+              if (!isBrowserPlayableUrl(playUrl)) {
+                return null
+              }
+              return {
+                id: apeId,
+                sourceId: apeId,
+                sourceType: 'realtime',
+                deviceId: apeId,
+                name: d.name || apeId,
+                slotIndex: idx,
+                playUrl
+              }
+            } catch (error) {
+              return null
+            }
+          }))).filter(Boolean)
           if (fallbackStreams.length > 0) {
             return Promise.all(fallbackStreams.map(stream => this.enrichWallStream(stream)))
           }
@@ -341,12 +357,15 @@ export default {
           ? false
           : this.toBoolean(this.getFieldValue(detail, 'frontendOverlayEnabled', 'frontend_overlay_enabled'), true)
         const algorithmStreamUrl = this.getFieldValue(detail, 'algorithmStreamUrl', 'algorithm_stream_url') || ''
+        const playableAlgorithmStreamUrl = extractPlayableUrl(algorithmStreamUrl)
 
         return {
           ...stream,
           deviceId: this.getFieldValue(detail, 'deviceId', 'device_id', 'apeId', 'ape_id') || stream.deviceId || '',
           name: this.getFieldValue(detail, 'taskName', 'task_name', 'title', 'name') || stream.name,
-          playUrl: taskPushEnabled && algorithmStreamUrl ? algorithmStreamUrl : stream.playUrl,
+          playUrl: taskPushEnabled && isBrowserPlayableUrl(playableAlgorithmStreamUrl)
+            ? playableAlgorithmStreamUrl
+            : stream.playUrl,
           taskPushEnabled,
           frontendOverlayEnabled
         }
@@ -481,13 +500,17 @@ export default {
 
       this.destroyStreamPlayer(index)
       this.clearOverlayCanvas(index)
-      const isFlv = /\.flv($|[?#])/i.test(url)
-      const isHttpOrWs = /^(https?:\/\/|wss?:\/\/)/i.test(url)
+      const playableUrl = extractPlayableUrl(url)
+      if (!isBrowserPlayableUrl(playableUrl)) {
+        this.updateStreamCard(index, { status: 'failed', playUrl: '' })
+        return
+      }
+      const isFlv = isFlvUrl(playableUrl)
 
-      if (isFlv && isHttpOrWs && flvjs.isSupported()) {
+      if (isFlv && flvjs.isSupported()) {
         const player = flvjs.createPlayer({
           type: 'flv',
-          url,
+          url: playableUrl,
           isLive: true
         })
         player.attachMediaElement(videoElement)
@@ -505,7 +528,12 @@ export default {
         return
       }
 
-      videoElement.src = url
+      if (isFlv) {
+        this.updateStreamCard(index, { status: 'failed', playUrl: '' })
+        return
+      }
+
+      videoElement.src = playableUrl
       videoElement.play().then(() => {
         this.updateStreamCard(index, { status: 'playing' })
       }).catch(() => {
