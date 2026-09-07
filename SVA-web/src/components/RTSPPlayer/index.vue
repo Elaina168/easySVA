@@ -19,6 +19,7 @@
 
 <script>
 import flvjs from 'flv.js';
+import { extractPlayableUrl, isBrowserPlayableUrl, isFlvUrl } from '@/utils/mediaPlayback';
 
 export default {
   name: 'player',
@@ -66,22 +67,6 @@ export default {
   },
 
   methods: {
-    isRtspUrl(url) {
-      return /^rtsp:\/\//i.test(url || '');
-    },
-
-    isGbUrl(url) {
-      return /^(gb28181|gb):\/\//i.test(url || '');
-    },
-
-    isHttpMediaUrl(url) {
-      return /^(https?:\/\/|wss?:\/\/|\/)/i.test(url || '');
-    },
-
-    isFlvUrl(url) {
-      return /\.flv($|[?#])/i.test(url || '');
-    },
-
     playHttpMedia(url) {
       const videoElement = this.$refs.flvVideo;
       if (!videoElement || !url) return;
@@ -130,64 +115,16 @@ export default {
 
     initFLVPlayer() {
       const videoElement = this.$refs.flvVideo;
-      if (!videoElement || !this.rtspUrl) return;
-
-      if (this.isHttpMediaUrl(this.rtspUrl) && this.isFlvUrl(this.rtspUrl)) {
-        this.playFlvMedia(this.rtspUrl);
+      const url = extractPlayableUrl(this.rtspUrl);
+      if (!videoElement || !isBrowserPlayableUrl(url)) {
+        this.closeFLVPlayer(true);
         return;
       }
 
-      if (/^(https?:\/\/|\/)/i.test(this.rtspUrl)) {
-        this.playHttpMedia(this.rtspUrl);
-        return;
-      }
-
-      const currentHost = window.location.hostname || 'localhost';
-
-      if (this.isGbUrl(this.rtspUrl)) {
-        const gbMatches = this.rtspUrl.match(/^(?:gb28181|gb):\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i);
-        const url = gbMatches
-          ? `http://${currentHost}:9992/${gbMatches[1]}/${gbMatches[2]}.live.flv`
-          : `http://${currentHost}:9992/live/acceptance.live.flv`;
+      if (isFlvUrl(url)) {
         this.playFlvMedia(url);
-        return;
-      }
-
-      if (!this.isRtspUrl(this.rtspUrl)) {
-        if (this.flvPlayer != null) this.closeFLVPlayer(true);
-        return;
-      }
-
-      let url = this.rtspUrl;
-      const rtspMatches = url.match(/^rtsp:\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i);
-      if (rtspMatches) {
-        url = `http://${currentHost}:9992/${rtspMatches[1]}/${rtspMatches[2]}.live.flv`;
       } else {
-        url = `http://${currentHost}:9992/live/acceptance.live.flv`;
-      }
-
-      // 销毁
-      if (this.flvPlayer != null) this.closeFLVPlayer(true);
-
-      if (flvjs.isSupported()) {
-        console.log("正在加载播放器……", url);
-        this.flvPlayer = flvjs.createPlayer({
-          isLive: true,
-          type: 'flv',
-          url: url,
-          cors: true,
-          enableWorker: false,
-          enableStashBuffer: false,
-          stashInitialSize: 128
-        });
-
-        this.flvPlayer.attachMediaElement(videoElement);
-        this.flvPlayer.load();
-        const playPromise = this.flvPlayer.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(() => {});
-        }
-        this.flvPlayer.muted = false; // 确保新播放器不是静音状态
+        this.playHttpMedia(url);
       }
     },
 
