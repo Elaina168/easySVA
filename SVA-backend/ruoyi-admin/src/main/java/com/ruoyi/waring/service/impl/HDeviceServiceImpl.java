@@ -21,6 +21,7 @@ import com.ruoyi.waring.service.HDeviceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.dao.DuplicateKeyException;
@@ -74,6 +75,12 @@ public class HDeviceServiceImpl implements HDeviceService {
 
     @Autowired(required = false)
     private RestTemplate restTemplate;
+
+    @Value("${gb28181.api-port:0}")
+    private Integer gbApiPort;
+
+    @Value("${gb28181.platform-id:}")
+    private String gbPlatformId;
 
     @PostConstruct
     private void initRestTemplate() {
@@ -552,13 +559,13 @@ public class HDeviceServiceImpl implements HDeviceService {
             throw new ServiceException("设备不存在: " + apeId);
         }
 
-        String previewAddProxyUrl = buildDirectAddProxyUrl(device);
         String previewPlayUrl = normalizeBrowserPlayUrl(device.getPlay_url());
         if (StringUtils.isBlank(previewPlayUrl)) {
-            previewPlayUrl = buildDirectPlayUrl(device);
-        }
-        if (StringUtils.isBlank(previewPlayUrl)) {
-            previewPlayUrl = device.getDirect_source_url();
+            previewPlayUrl = "";
+            if (DEVICE_TYPE_RTSP.equalsIgnoreCase(device.getDevice_type())
+                    && isDirectDevice(device)) {
+                previewPlayUrl = buildDirectPlayUrl(device);
+            }
         }
 
         Map<String, Object> result = new HashMap<>();
@@ -568,6 +575,10 @@ public class HDeviceServiceImpl implements HDeviceService {
         result.put("monitorStatus", device.getMonitor_status());
         result.put("directSourceUrl", device.getDirect_source_url());
         result.put("playUrl", previewPlayUrl);
+        result.put("deviceType", device.getDevice_type());
+        result.put("isOnline", device.getIs_online());
+        result.put("gbDeviceId", device.getGb_device_id());
+        result.put("gbPlatformId", device.getGb_platform_id());
         result.put("ipAddr", device.getIp_addr());
         result.put("port", device.getPort());
         result.put("supportedMonitorStatuses", new String[] {
@@ -857,7 +868,7 @@ public class HDeviceServiceImpl implements HDeviceService {
      * <p>
      * 设备列表：GET /gb28181/api/devices（注册设备，含 online 状态）
      * 活跃会话：GET /gb28181/api/sessions（按 device_id 匹配 streaming 会话的 stream_id，用于生成 play_url）
-     * 控制 API 默认端口 18080（任务三 GbSipServer），与 ZLM 同机部署，host 复用 zlmServer.host。
+     * 控制 API 端口和平台 ID 使用 gb28181 配置，与 ZLM 同机部署，host 复用 zlmServer.host。
      */
     private List<GbDeviceDTO> fetchGbDevicesFromZlm(ZlmServer zlmServer) {
         List<GbDeviceDTO> devices = new ArrayList<>();
@@ -865,8 +876,14 @@ public class HDeviceServiceImpl implements HDeviceService {
             log.warn("[GB28181] ZLM 服务器配置缺失，跳过国标设备同步（保留原状态）");
             return null;
         }
-        final int gbApiPort = 18080;
-        final String gbPlatformId = "34020000002000000001";
+        if (gbApiPort == null || gbApiPort < 1 || gbApiPort > 65535) {
+            log.error("配置 gb28181.api-port 无效: {}", gbApiPort);
+            throw new ServiceException("配置 gb28181.api-port 必须为 1 到 65535 之间的端口");
+        }
+        if (StringUtils.isBlank(gbPlatformId)) {
+            log.error("配置 gb28181.platform-id 为空");
+            throw new ServiceException("配置 gb28181.platform-id 不能为空");
+        }
         String base = "http://" + zlmServer.getHost() + ":" + gbApiPort + "/gb28181/api";
         try {
             // 1. 拉取注册设备列表
@@ -907,7 +924,7 @@ public class HDeviceServiceImpl implements HDeviceService {
                 log.warn("[GB28181] 获取活跃会话失败（不影响设备同步）: {}", e.getMessage());
             }
             // 3. 字段映射 + play_url 自动生成（HTTP-FLV，任务三当前关闭 HLS）
-            int httpPort = zlmServer.getMedia_http_port() != null ? zlmServer.getMedia_http_port() : 9992;
+            Integer httpPort = zlmServer.getMedia_http_port();
             for (JsonNode dev : devData) {
                 String deviceId = dev.path("device_id").asText("");
                 if (StringUtils.isBlank(deviceId)) {
@@ -920,7 +937,7 @@ public class HDeviceServiceImpl implements HDeviceService {
                 dto.setPlatformId(gbPlatformId);
                 dto.setStatus(dev.path("online").asBoolean(false) ? "online" : "offline");
                 String streamId = deviceStreamMap.get(deviceId);
-                if (StringUtils.isNotBlank(streamId)) {
+                if (StringUtils.isNotBlank(streamId) && httpPort != null && httpPort > 0) {
                     dto.setStreamId(streamId);
                     dto.setPlayUrl("ws://" + browserMediaHost(zlmServer.getHost()) + ":" + httpPort + "/rtp/" + streamId + ".live.flv");
                 }
