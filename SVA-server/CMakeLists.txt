@@ -22,13 +22,22 @@ option(SVA_ONNXRUNTIME_GPU "Enable ONNX Runtime TensorRT/CUDA execution provider
 message(STATUS "ONNX Runtime root: ${ONNXRUNTIME_ROOT}")
 message(STATUS "SVA_ONNXRUNTIME_GPU: ${SVA_ONNXRUNTIME_GPU}")
 
+set(SVA_DEP_ROOT "/usr/local" CACHE PATH "Third-party dependency prefix")
+
 # third lib start
 include_directories(/usr/local/include)
+include_directories(${SVA_DEP_ROOT}/include)
 link_directories(/usr/local/lib)
 link_directories(/usr/local/lib64)
+link_directories(${SVA_DEP_ROOT}/lib)
+link_directories(${SVA_DEP_ROOT}/lib64)
 include_directories(/usr/include/jsoncpp) #jsoncpp
+include_directories(${SVA_DEP_ROOT}/include/jsoncpp)
+include_directories(${SVA_DEP_ROOT}/include/x86_64-linux-gnu)
 include_directories(/usr/local/ffmpeg/include) #ffmpeg
+include_directories(${SVA_DEP_ROOT}/include/ffmpeg)
 link_directories(/usr/local/ffmpeg/lib) #ffmpeg
+link_directories(${SVA_DEP_ROOT}/lib/x86_64-linux-gnu)
 find_package(OpenCV REQUIRED) #opencv
 
 include_directories(${ONNXRUNTIME_ROOT}/include) #onnxruntime
@@ -66,6 +75,7 @@ endif()
 target_link_libraries(Analyzer ${OpenCV_LIBS})
 target_link_libraries(Analyzer event curl crypto jsoncpp avformat avcodec avutil swscale swresample pthread)
 target_link_libraries(Analyzer onnxruntime) #onnxruntime
+target_link_options(Analyzer PRIVATE "-Wl,--allow-shlib-undefined")
 
 option(SVA_BUILD_POSE_SMOKE_TEST "Build the standalone YOLO Pose video smoke test" ON)
 if(SVA_BUILD_POSE_SMOKE_TEST)
@@ -81,6 +91,7 @@ if(SVA_BUILD_POSE_SMOKE_TEST)
     target_compile_definitions(PoseSmokeTest PRIVATE SVA_ONNXRUNTIME_GPU=0)
   endif()
   target_link_libraries(PoseSmokeTest ${OpenCV_LIBS} onnxruntime pthread)
+  target_link_options(PoseSmokeTest PRIVATE "-Wl,--allow-shlib-undefined")
 endif()
 
 if(BUILD_TESTING)
@@ -89,5 +100,15 @@ if(BUILD_TESTING)
           Analyzer/Core/SleepPoseEvaluator.cpp)
   target_include_directories(SleepPoseUnitTest PRIVATE Analyzer/Core)
   target_link_libraries(SleepPoseUnitTest ${OpenCV_LIBS})
+  target_link_options(SleepPoseUnitTest PRIVATE "-Wl,--allow-shlib-undefined")
   add_test(NAME SleepPoseUnitTest COMMAND SleepPoseUnitTest)
+
+  add_executable(StreamUrlUnitTest
+          Analyzer/Tools/StreamUrlUnitTest.cpp
+          Analyzer/Core/AvPullStream.cpp
+          Analyzer/Core/Config.cpp)
+  target_include_directories(StreamUrlUnitTest PRIVATE Analyzer/Core ${SVA_DEP_ROOT}/include /usr/include/jsoncpp)
+  target_link_libraries(StreamUrlUnitTest ${OpenCV_LIBS} avformat avcodec avutil jsoncpp pthread)
+  target_link_options(StreamUrlUnitTest PRIVATE "-Wl,--allow-shlib-undefined")
+  add_test(NAME StreamUrlUnitTest COMMAND StreamUrlUnitTest)
 endif()

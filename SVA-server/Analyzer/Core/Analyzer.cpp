@@ -1,4 +1,4 @@
-﻿#include "Analyzer.h"
+#include "Analyzer.h"
 #include "Algorithm.h"
 #include <json/json.h>
 #include "Scheduler.h"
@@ -39,7 +39,7 @@ namespace SVAAnalyzer
         {
             return mScheduler->on_yolo26n_80;
         }
-        if (algorithmCode == "on_yolo11n_pose")
+        if (algorithmCode == "on_yolo11n_pose" || algorithmCode == "sleep_yolopose" || algorithmCode == "on_sleep_yolopose")
         {
             return mScheduler->on_yolo11n_pose;
         }

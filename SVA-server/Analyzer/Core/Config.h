@@ -1,4 +1,4 @@
-﻿#ifndef ANALYZER_CONFIG_H
+#ifndef ANALYZER_CONFIG_H
 #define ANALYZER_CONFIG_H
 
 #include <string>
@@ -48,6 +48,7 @@ namespace SVAAnalyzer
 
 		std::string uploadDir{};
 		std::string modelDir{};
+		std::string sleepModelFile = "yolo11n-pose.onnx";
 	};
 }
 #endif // ANALYZER_CONFIG_H

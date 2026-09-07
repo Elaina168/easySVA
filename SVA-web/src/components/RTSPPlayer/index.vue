@@ -70,6 +70,10 @@ export default {
       return /^rtsp:\/\//i.test(url || '');
     },
 
+    isGbUrl(url) {
+      return /^(gb28181|gb):\/\//i.test(url || '');
+    },
+
     isHttpMediaUrl(url) {
       return /^(https?:\/\/|wss?:\/\/|\/)/i.test(url || '');
     },
@@ -97,11 +101,30 @@ export default {
         this.flvPlayer = flvjs.createPlayer({
           isLive: true,
           type: 'flv',
-          url: url
+          url: url,
+          cors: true,
+          hasAudio: false
+        }, {
+          enableWorker: false,
+          enableStashBuffer: false,
+          stashInitialSize: 128,
+          autoCleanupSourceBuffer: true,
+          autoCleanupMaxBackwardDuration: 15,
+          autoCleanupMinBackwardDuration: 5
         });
         this.flvPlayer.attachMediaElement(videoElement);
         this.flvPlayer.load();
-        this.flvPlayer.play();
+        this.flvPlayer.play().catch(() => {});
+
+        this.flvPlayer.on(flvjs.Events.ERROR, (errType, errDetail) => {
+          console.warn('[RTSPPlayer] FLV error:', errType, errDetail);
+          if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = setTimeout(() => {
+            if (this.viewProof && this.rtspUrl) {
+              this.initFLVPlayer();
+            }
+          }, 1200);
+        });
       }
     },
 
@@ -119,29 +142,51 @@ export default {
         return;
       }
 
+      const currentHost = window.location.hostname || 'localhost';
+
+      if (this.isGbUrl(this.rtspUrl)) {
+        const gbMatches = this.rtspUrl.match(/^(?:gb28181|gb):\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i);
+        const url = gbMatches
+          ? `http://${currentHost}:9992/${gbMatches[1]}/${gbMatches[2]}.live.flv`
+          : `http://${currentHost}:9992/live/acceptance.live.flv`;
+        this.playFlvMedia(url);
+        return;
+      }
+
       if (!this.isRtspUrl(this.rtspUrl)) {
         if (this.flvPlayer != null) this.closeFLVPlayer(true);
         return;
       }
 
-      const url = `ws://192.168.125.30:9117/rtsp?url=${btoa(this.rtspUrl)}`;
+      let url = this.rtspUrl;
+      const rtspMatches = url.match(/^rtsp:\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i);
+      if (rtspMatches) {
+        url = `http://${currentHost}:9992/${rtspMatches[1]}/${rtspMatches[2]}.live.flv`;
+      } else {
+        url = `http://${currentHost}:9992/live/acceptance.live.flv`;
+      }
+
       // 销毁
       if (this.flvPlayer != null) this.closeFLVPlayer(true);
 
       if (flvjs.isSupported()) {
-        console.log("正在加载播放器……");
+        console.log("正在加载播放器……", url);
         this.flvPlayer = flvjs.createPlayer({
           isLive: true,
           type: 'flv',
           url: url,
-          enableWorker: true,
+          cors: true,
+          enableWorker: false,
           enableStashBuffer: false,
           stashInitialSize: 128
         });
 
         this.flvPlayer.attachMediaElement(videoElement);
         this.flvPlayer.load();
-        this.flvPlayer.play();
+        const playPromise = this.flvPlayer.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {});
+        }
         this.flvPlayer.muted = false; // 确保新播放器不是静音状态
       }
     },

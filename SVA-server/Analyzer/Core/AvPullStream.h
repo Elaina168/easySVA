@@ -1,4 +1,4 @@
-﻿#ifndef ANALYZER_AVPULLSTREAM_H
+#ifndef ANALYZER_AVPULLSTREAM_H
 #define ANALYZER_AVPULLSTREAM_H
 #include <queue>
 #include <mutex>
@@ -23,6 +23,8 @@ namespace SVAAnalyzer
 		bool connect();		 // 连接流媒体服务
 		bool reConnect();	 // 重连流媒体服务
 		void closeConnect(); // 关闭流媒体服务的连接
+
+		static std::string normalizeStreamUrl(const std::string &sourceUrl, int defaultRtspPort);
 
 		int mConnectCount = 0;
 

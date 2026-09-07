@@ -1557,17 +1557,37 @@ export default {
         return
       }
       try {
-        const response = await previewDeviceMonitor(apeId)
-        const streamUrl = this.extractPreviewUrl(response)
-        this.streamUrl = streamUrl
-        this.playStream(streamUrl)
+        let streamUrl = ''
+        try {
+          const response = await previewDeviceMonitor(apeId)
+          streamUrl = this.extractPreviewUrl(response)
+        } catch (e) {}
+
         if (!streamUrl) {
-          this.$message.warning('未获取到实时流地址')
+          const opt = this.deviceOptions.find(o => o.value === apeId)
+          if (opt && opt.raw) {
+            streamUrl = opt.raw.play_url || opt.raw.direct_source_url || ''
+          }
+        }
+
+        this.streamUrl = streamUrl
+        if (streamUrl) {
+          this.playStream(streamUrl)
+        } else {
+          this.destroyPlayer()
+          this.$message.warning('未获取到该设备的实时流地址，请先在设备管理中配置')
         }
       } catch (error) {
-        this.streamUrl = ''
-        this.destroyPlayer()
-        this.$message.error('获取实时流地址失败')
+        const opt = this.deviceOptions.find(o => o.value === apeId)
+        const fallbackUrl = opt && opt.raw && (opt.raw.play_url || opt.raw.direct_source_url)
+        if (fallbackUrl) {
+          this.streamUrl = fallbackUrl
+          this.playStream(fallbackUrl)
+        } else {
+          this.streamUrl = ''
+          this.destroyPlayer()
+          this.$message.error('获取实时流地址失败')
+        }
       }
     },
 
@@ -4514,6 +4534,24 @@ export default {
       }
     },
 
+    normalizePlayerUrl(rawUrl) {
+      if (!rawUrl) return ''
+      let url = String(rawUrl).trim()
+      const currentHost = window.location.hostname || 'localhost'
+
+      // 如果是 RTSP 协议，自动转换为浏览器可直接拉取的 ZLM HTTP-FLV 地址
+      if (/^rtsp:\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i.test(url)) {
+        const matches = url.match(/^rtsp:\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i)
+        if (matches) {
+          return `http://${currentHost}:9992/${matches[1]}/${matches[2]}.live.flv`
+        }
+      }
+
+      // 如果是 127.0.0.1 或 localhost，自动适配为当前访问的前端 host
+      url = url.replace(/:\/\/(127\.0\.0\.1|localhost)(:\d+)/, `://${currentHost}$2`)
+      return url
+    },
+
     playStream(url) {
       this.destroyPlayer()
       this.videoLoaded = false
@@ -4522,22 +4560,38 @@ export default {
         return
       }
 
-      const isFlv = /\.flv($|[?#])/i.test(url)
-      const isHttpOrWs = /^(https?:\/\/|wss?:\/\/)/i.test(url)
+      const targetUrl = this.normalizePlayerUrl(url)
+      const isFlv = /\.flv($|[?#])/i.test(targetUrl)
+      const isHttpOrWs = /^(https?:\/\/|wss?:\/\/)/i.test(targetUrl)
 
       if (isFlv && isHttpOrWs && flvjs.isSupported()) {
-        this.flvPlayer = flvjs.createPlayer({
-          type: 'flv',
-          url,
-          isLive: true
-        })
-        this.flvPlayer.attachMediaElement(video)
-        this.flvPlayer.load()
-        this.flvPlayer.play().catch(() => {})
-        return
+        try {
+          this.flvPlayer = flvjs.createPlayer({
+            type: 'flv',
+            url: targetUrl,
+            isLive: true,
+            cors: true
+          }, {
+            enableWorker: false,
+            lazyLoad: false,
+            stashInitialSize: 128
+          })
+          this.flvPlayer.attachMediaElement(video)
+          this.flvPlayer.load()
+          const playPromise = this.flvPlayer.play()
+          if (playPromise !== undefined) {
+            playPromise.catch(() => {})
+          }
+          this.flvPlayer.on(flvjs.Events.ERROR, () => {
+            console.warn('[DeploymentAdd] FLV stream waiting for data...')
+          })
+          return
+        } catch (e) {
+          console.error('[DeploymentAdd] Player error', e)
+        }
       }
 
-      video.src = url
+      video.src = targetUrl
       video.play().catch(() => {})
     },
 
