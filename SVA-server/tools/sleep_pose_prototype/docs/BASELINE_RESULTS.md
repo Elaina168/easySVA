@@ -60,12 +60,12 @@
 | Opset | 17 |
 | 输入节点 | `images` |
 | 输入张量 | `[1, 3, 640, 640]`、`tensor(float)` |
-| 输出节点 | `output0` |
-| 输出张量 | `[1, 56, 8400]`、`tensor(float)` |
+| 输出节点 | `output0`（该基线模型实测值） |
+| 输出张量 | `[1, 56, 8400]`、`tensor(float)`（该基线模型实测值） |
 | 动态尺寸 | 否 |
 | 内置 NMS | 否 |
 
-输入预处理使用 RGB、NCHW、float32、数值范围 `[0, 1]`、保持宽高比的 letterbox 和填充值 114。C++ 实现应以随模型生成的 `models/model_io.json` 为准，并自行实现置信度过滤、Pose 输出解码、NMS 和 letterbox 坐标逆变换。
+输入图像来自 OpenCV BGR，预处理交换通道为 RGB，形成 NCHW、float32、数值范围 `[0, 1]` 的张量，并使用保持宽高比的 letterbox 和填充值 114。C++ 实现按 ONNX Runtime 实际读取的节点名和维度工作，允许 `[1, 56, N]` 与 `[1, N, 56]` 两种布局，并自行实现置信度过滤、Pose 输出解码、NMS 和 letterbox 坐标逆变换。
 
 ## 下一阶段
 

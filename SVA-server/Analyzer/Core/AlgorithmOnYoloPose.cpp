@@ -205,21 +205,27 @@ namespace SVAAnalyzer
         const auto outputName = mSession.GetOutputNameAllocated(0, allocator);
         mOutputNodeName = outputName.get();
         mOutputDims = mSession.GetOutputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
-        if (mOutputDims.size() != 3 || mOutputDims[0] != 1 ||
-            mOutputDims[1] != POSE_OUTPUT_CHANNELS || mOutputDims[2] <= 0)
+        const PoseOutputShape outputShape = inspectPoseOutputShape(mOutputDims);
+        if (outputShape.channels != POSE_OUTPUT_CHANNELS)
         {
-            throw std::runtime_error("Pose model output must be fixed [1,56,N]");
+            throw std::runtime_error("Pose model output must contain 56 channels");
         }
-        mOutputChannels = static_cast<int>(mOutputDims[1]);
-        mPredictionCount = static_cast<int>(mOutputDims[2]);
+        mOutputLayout = outputShape.layout;
+        mOutputChannels = outputShape.channels;
+        mPredictionCount = outputShape.predictionCount;
 
-        LOGI("Pose ONNX input=%s [1,3,%d,%d] output=%s [1,%d,%d] provider=%s",
+        const char *layoutName = mOutputLayout == PoseOutputLayout::ChannelsFirst
+                                     ? "[1,56,N]"
+                                     : "[1,N,56]";
+        LOGI("Pose ONNX input=%s [1,3,%d,%d] output=%s [%lld,%lld,%lld] layout=%s provider=%s",
              mInputNodeName.c_str(),
              mInputHeight,
              mInputWidth,
              mOutputNodeName.c_str(),
-             mOutputChannels,
-             mPredictionCount,
+             static_cast<long long>(mOutputDims[0]),
+             static_cast<long long>(mOutputDims[1]),
+             static_cast<long long>(mOutputDims[2]),
+             layoutName,
              mActiveProvider.c_str());
     }
 
@@ -276,8 +282,19 @@ namespace SVAAnalyzer
         }
 
         const auto actualOutputDims = outputs[0].GetTensorTypeAndShapeInfo().GetShape();
-        if (actualOutputDims.size() != 3 || actualOutputDims[0] != 1 ||
-            actualOutputDims[1] != mOutputChannels || actualOutputDims[2] != mPredictionCount)
+        PoseOutputShape actualOutputShape;
+        try
+        {
+            actualOutputShape = inspectPoseOutputShape(actualOutputDims);
+        }
+        catch (const std::invalid_argument &e)
+        {
+            LOGE("Pose runtime output shape is invalid: %s", e.what());
+            return false;
+        }
+        if (actualOutputShape.layout != mOutputLayout ||
+            actualOutputShape.channels != mOutputChannels ||
+            actualOutputShape.predictionCount != mPredictionCount)
         {
             LOGE("Pose runtime output shape does not match the inspected model contract");
             return false;
@@ -290,9 +307,8 @@ namespace SVAAnalyzer
             return false;
         }
 
-        auto valueAt = [output, this](int channel, int prediction) -> float {
-            return output[static_cast<size_t>(channel) * static_cast<size_t>(mPredictionCount) +
-                          static_cast<size_t>(prediction)];
+        auto valueAt = [output, &actualOutputShape](int channel, int prediction) -> float {
+            return poseOutputValue(output, actualOutputShape, channel, prediction);
         };
         auto mapBoxX = [&transform, &image](float x) -> float {
             return clampBoxCoordinate((x - static_cast<float>(transform.padLeft)) / transform.scale, image.cols);
