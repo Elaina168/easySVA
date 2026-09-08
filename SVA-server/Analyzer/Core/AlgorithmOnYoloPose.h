@@ -2,6 +2,7 @@
 #define ANALYZER_ALGORITHMONYOLOPOSE_H
 
 #include "Algorithm.h"
+#include "PoseOutputLayout.h"
 #include <onnxruntime_cxx_api.h>
 #include <string>
 #include <vector>
@@ -38,6 +39,7 @@ namespace SVAAnalyzer
         int mInputHeight = 0;
         int mOutputChannels = 0;
         int mPredictionCount = 0;
+        PoseOutputLayout mOutputLayout = PoseOutputLayout::ChannelsFirst;
         std::vector<int64_t> mOutputDims;
         bool mGpuEnabled = false;
         std::string mActiveProvider = "CPU";

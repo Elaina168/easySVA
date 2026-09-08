@@ -111,4 +111,9 @@ if(BUILD_TESTING)
   target_link_libraries(StreamUrlUnitTest ${OpenCV_LIBS} avformat avcodec avutil jsoncpp pthread)
   target_link_options(StreamUrlUnitTest PRIVATE "-Wl,--allow-shlib-undefined")
   add_test(NAME StreamUrlUnitTest COMMAND StreamUrlUnitTest)
+
+  add_executable(PoseOutputLayoutUnitTest
+          Analyzer/Tools/PoseOutputLayoutUnitTest.cpp)
+  target_include_directories(PoseOutputLayoutUnitTest PRIVATE Analyzer/Core)
+  add_test(NAME PoseOutputLayoutUnitTest COMMAND PoseOutputLayoutUnitTest)
 endif()

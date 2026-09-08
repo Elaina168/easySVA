@@ -1078,6 +1078,7 @@ import { getDeviceList, previewDeviceMonitor } from '@/api/device'
 import { getAlgorithmList, getAlgorithmTargets } from '@/api/algorithm'
 import { createDeployment, getDeploymentDetail, updateDeployment } from '@/api/deployment'
 import { OVERLAY_DELAY_DEFAULT_MS, loadOverlayDelayMs } from '@/utils/systemRuntimeConfig'
+import { extractPlayableUrl, isBrowserPlayableUrl, isFlvUrl } from '@/utils/mediaPlayback'
 
 export default {
   name: 'DeploymentAdd',
@@ -1453,14 +1454,6 @@ export default {
       return Boolean(value)
     },
 
-    extractPreviewUrl(response) {
-      if (!response) {
-        return ''
-      }
-      const data = response.data || response
-      return data.playUrl || data.previewUrl || data.url || data.streamUrl || data.rtspUrl || data.flvUrl || data.directSourceUrl || data.direct_source_url || data.liveUrl || data.live_url || ''
-    },
-
     async loadDeploymentDetail(deploymentId) {
       if (!deploymentId) {
         return
@@ -1517,7 +1510,7 @@ export default {
         const pushEnabled = this.toBoolean(this.getFieldValue(detail, 'pushEnabled', 'push_enabled'), false)
         const algorithmStreamUrl = this.getFieldValue(detail, 'algorithmStreamUrl', 'algorithm_stream_url') || ''
 
-        if (isRunning && pushEnabled && algorithmStreamUrl) {
+        if (isRunning && pushEnabled && isBrowserPlayableUrl(algorithmStreamUrl)) {
           this.streamUrl = algorithmStreamUrl
           this.playStream(algorithmStreamUrl)
           return
@@ -1557,19 +1550,8 @@ export default {
         return
       }
       try {
-        let streamUrl = ''
-        try {
-          const response = await previewDeviceMonitor(apeId)
-          streamUrl = this.extractPreviewUrl(response)
-        } catch (e) {}
-
-        if (!streamUrl) {
-          const opt = this.deviceOptions.find(o => o.value === apeId)
-          if (opt && opt.raw) {
-            streamUrl = opt.raw.play_url || opt.raw.direct_source_url || ''
-          }
-        }
-
+        const response = await previewDeviceMonitor(apeId)
+        const streamUrl = extractPlayableUrl(response)
         this.streamUrl = streamUrl
         if (streamUrl) {
           this.playStream(streamUrl)
@@ -1578,16 +1560,9 @@ export default {
           this.$message.warning('未获取到该设备的实时流地址，请先在设备管理中配置')
         }
       } catch (error) {
-        const opt = this.deviceOptions.find(o => o.value === apeId)
-        const fallbackUrl = opt && opt.raw && (opt.raw.play_url || opt.raw.direct_source_url)
-        if (fallbackUrl) {
-          this.streamUrl = fallbackUrl
-          this.playStream(fallbackUrl)
-        } else {
-          this.streamUrl = ''
-          this.destroyPlayer()
-          this.$message.error('获取实时流地址失败')
-        }
+        this.streamUrl = ''
+        this.destroyPlayer()
+        this.$message.error('获取实时流地址失败')
       }
     },
 
@@ -4534,24 +4509,6 @@ export default {
       }
     },
 
-    normalizePlayerUrl(rawUrl) {
-      if (!rawUrl) return ''
-      let url = String(rawUrl).trim()
-      const currentHost = window.location.hostname || 'localhost'
-
-      // 如果是 RTSP 协议，自动转换为浏览器可直接拉取的 ZLM HTTP-FLV 地址
-      if (/^rtsp:\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i.test(url)) {
-        const matches = url.match(/^rtsp:\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i)
-        if (matches) {
-          return `http://${currentHost}:9992/${matches[1]}/${matches[2]}.live.flv`
-        }
-      }
-
-      // 如果是 127.0.0.1 或 localhost，自动适配为当前访问的前端 host
-      url = url.replace(/:\/\/(127\.0\.0\.1|localhost)(:\d+)/, `://${currentHost}$2`)
-      return url
-    },
-
     playStream(url) {
       this.destroyPlayer()
       this.videoLoaded = false
@@ -4560,11 +4517,15 @@ export default {
         return
       }
 
-      const targetUrl = this.normalizePlayerUrl(url)
-      const isFlv = /\.flv($|[?#])/i.test(targetUrl)
-      const isHttpOrWs = /^(https?:\/\/|wss?:\/\/)/i.test(targetUrl)
+      const targetUrl = typeof url === 'string' ? url.trim() : ''
+      if (!isBrowserPlayableUrl(targetUrl)) {
+        this.$message.warning('播放地址不可用')
+        return
+      }
 
-      if (isFlv && isHttpOrWs && flvjs.isSupported()) {
+      const isFlv = isFlvUrl(targetUrl)
+
+      if (isFlv && flvjs.isSupported()) {
         try {
           this.flvPlayer = flvjs.createPlayer({
             type: 'flv',
@@ -4589,6 +4550,12 @@ export default {
         } catch (e) {
           console.error('[DeploymentAdd] Player error', e)
         }
+        return
+      }
+
+      if (isFlv) {
+        this.$message.warning('当前浏览器不支持 FLV 播放')
+        return
       }
 
       video.src = targetUrl

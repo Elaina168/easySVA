@@ -292,6 +292,7 @@ import { deptTreeSelect } from '@/api/system/user'
 import { getDeviceList, previewDeviceMonitor, startDeviceMonitor, stopDeviceMonitor } from '@/api/device'
 import { upsertScreenWallStream } from '@/api/screenWall'
 import player from '@/components/RTSPPlayer'
+import { extractPlayableUrl, isBrowserPlayableUrl, isFlvUrl } from '@/utils/mediaPlayback'
 
 export default {
   name: 'DeviceRealtimeMonitor',
@@ -299,7 +300,7 @@ export default {
   data() {
     return {
       activeView: 'grid', // 'grid' (分屏监控) 或 'table' (设备列表)
-      splitCount: 4,      // 1, 4, 9
+      splitCount: 4, // 1, 4, 9
       currentSlotIndex: 0,
       loading: false,
       total: 0,
@@ -377,26 +378,6 @@ export default {
     isDevicePlaying(apeId) {
       return this.activeSlots.some(slot => slot.deviceId === apeId && slot.playUrl)
     },
-    normalizeStreamUrl(rawUrl) {
-      if (!rawUrl) return ''
-      let url = String(rawUrl).trim()
-      const currentHost = window.location.hostname || 'localhost'
-
-      // 无论是否带端口，只要是 RTSP 流 (如 rtsp://.../live/acceptance)，自动转换为浏览器可直接拉取的 HTTP-FLV 地址
-      if (/^rtsp:\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i.test(url)) {
-        const matches = url.match(/^rtsp:\/\/[^/]+(?::\d+)?\/([^/]+)\/(.+)$/i)
-        if (matches) {
-          const app = matches[1]
-          const stream = matches[2]
-          return `http://${currentHost}:9992/${app}/${stream}.live.flv`
-        }
-      }
-
-      // 如果是 127.0.0.1 / localhost，自适应为当前浏览器访问的 hostname
-      url = url.replace(/:\/\/(127\.0\.0\.1|localhost)(:\d+)/, `://${currentHost}$2`)
-
-      return url
-    },
     async playDeviceInActiveSlot(device) {
       const apeId = this.getApeId(device)
       if (!apeId) {
@@ -414,17 +395,8 @@ export default {
       slot.error = ''
 
       try {
-        let rawUrl = ''
-        try {
-          const response = await previewDeviceMonitor(apeId)
-          rawUrl = this.extractPreviewUrl(response)
-        } catch (e) {}
-
-        if (!rawUrl) {
-          rawUrl = device.play_url || device.direct_source_url || ''
-        }
-
-        const playUrl = this.normalizeStreamUrl(rawUrl)
+        const response = await previewDeviceMonitor(apeId)
+        const playUrl = extractPlayableUrl(response)
 
         if (!playUrl) {
           slot.loading = false
@@ -458,14 +430,24 @@ export default {
           slot.flvPlayer.unload()
           slot.flvPlayer.detachMediaElement()
           slot.flvPlayer.destroy()
-        } catch (e) {}
+        } catch (e) {
+          // 播放器销毁失败时继续清理引用
+        }
         slot.flvPlayer = null
       }
 
-      const isFlv = /\.flv($|[?#])/i.test(url)
-      const isHttpOrWs = /^(https?:\/\/|wss?:\/\/)/i.test(url)
+      if (!isBrowserPlayableUrl(url)) {
+        videoElement.pause()
+        videoElement.removeAttribute('src')
+        videoElement.load()
+        slot.playUrl = ''
+        slot.error = '播放地址不可用'
+        return
+      }
 
-      if (isFlv && isHttpOrWs && flvjs.isSupported()) {
+      const isFlv = isFlvUrl(url)
+
+      if (isFlv && flvjs.isSupported()) {
         try {
           const player = flvjs.createPlayer({
             type: 'flv',
@@ -517,7 +499,9 @@ export default {
           slot.flvPlayer.unload()
           slot.flvPlayer.detachMediaElement()
           slot.flvPlayer.destroy()
-        } catch (e) {}
+        } catch (e) {
+          // 播放器销毁失败时继续清理引用
+        }
         slot.flvPlayer = null
       }
       const videoRefs = this.$refs[`videoSlot_${index}`]
@@ -683,17 +667,17 @@ export default {
       this.queryParams.monitor_status = ''
       this.handleQuery()
     },
-    extractPreviewUrl(response) {
-      if (!response) return ''
-      const data = response.data || response
-      return data.playUrl || data.previewUrl || data.url || data.streamUrl || data.rtspUrl || data.flvUrl || data.directSourceUrl || data.direct_source_url || data.liveUrl || data.live_url || ''
-    },
     async handleStart(row) {
       const apeId = this.getApeId(row)
       if (!apeId) return
       try {
-        await startDeviceMonitor(apeId)
-        this.$modal.msgSuccess('启动监控指令已发送')
+        const response = await startDeviceMonitor(apeId)
+        const payload = response && response.data && typeof response.data === 'object' ? response.data : (response || {})
+        const hasSuccess = Object.prototype.hasOwnProperty.call(payload, 'success')
+        this.$message({
+          type: hasSuccess && !payload.success ? 'warning' : 'success',
+          message: payload.shortMessage || '启动监控指令已发送'
+        })
       } catch (err) {
         this.$modal.msgWarning('启动监控失败')
       } finally {
@@ -704,8 +688,13 @@ export default {
       const apeId = this.getApeId(row)
       if (!apeId) return
       try {
-        await stopDeviceMonitor(apeId)
-        this.$modal.msgSuccess('停止监控指令已发送')
+        const response = await stopDeviceMonitor(apeId)
+        const payload = response && response.data && typeof response.data === 'object' ? response.data : (response || {})
+        const hasSuccess = Object.prototype.hasOwnProperty.call(payload, 'success')
+        this.$message({
+          type: hasSuccess && !payload.success ? 'warning' : 'success',
+          message: payload.shortMessage || '停止监控指令已发送'
+        })
       } catch (err) {
         this.$modal.msgWarning('停止监控失败')
       } finally {
@@ -720,7 +709,11 @@ export default {
       }
       try {
         const previewRes = await previewDeviceMonitor(sourceId)
-        const playUrl = this.normalizeStreamUrl(this.extractPreviewUrl(previewRes))
+        const playUrl = extractPlayableUrl(previewRes)
+        if (!playUrl) {
+          this.$modal.msgWarning('暂无可用播放流，无法加入监控墙')
+          return
+        }
         await upsertScreenWallStream({
           wallCode: 'main',
           sourceType: 'realtime',

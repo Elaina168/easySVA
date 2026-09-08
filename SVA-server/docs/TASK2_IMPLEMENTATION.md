@@ -15,12 +15,12 @@
 ## 二、架构设计与核心实现
 
 ### 1. 睡岗模型推理与行为判定管线（YOLO-Pose）
-- **算法路由接入**：`Scheduler.cpp` 中完成 `sleep_yolopose` 与 `on_sleep_yolopose` 算法编号注册与动态路由分发。
+- **算法路由接入**：`Analyzer.cpp` 将 `on_yolo11n_pose` 作为主算法代码，并保留 `sleep_yolopose` 与 `on_sleep_yolopose` 兼容别名。
 - **ONNX Runtime 引擎加载**：
   - 支持 GPU（CUDA）硬件加速优先，无 GPU 时自动回退至 CPUExecutionProvider。
-  - 按需动态加载 `modelDir/sleep_yolopose.onnx`；模型未安装时记录提示信息，不影响原有 YOLO11/YOLO26 任务的稳定运行。
+  - 默认加载 `modelDir/yolo11n-pose.onnx`，可由 `sleepModelFile` 指定文件名；仅在默认文件不可用时兼容查找 `sleep_yolopose.onnx`。模型未安装时记录提示信息，不影响原有 YOLO11/YOLO26 任务的稳定运行。
 - **姿态关键点与睡岗逻辑判定**（`SleepPoseEvaluator.cpp`）：
-  - 支持 Ultralytics YOLO-Pose 标准输出格式：`[1, 56, N]`（4 坐标 + 1 置信度 + 17×3 关键点）以及转置输出 `[1, N, 56]`。
+  - 支持 Ultralytics YOLO-Pose 标准输出格式：`[1, 56, N]`（4 坐标 + 1 置信度 + 17×3 关键点）以及转置输出 `[1, N, 56]`；布局由 ONNX Runtime 实际输出维度识别，不按节点名称猜测。
   - 提取左右双肩（点5/6）到左右双髋（点11/12）的人体躯干中心轴向量，计算躯干与垂直方向的倾角 $\theta$。当 $|\theta| > 60^\circ$ 时判定为人体横向躺卧睡岗。
   - 关键点置信度不足或遮挡时，平滑回退至目标边界框宽高比（$w/h > 1.3$）与低头沉睡判定。
   - 结合时间窗口约束（连续处于判定状态超过 `thresholdMs` 且位移在 `maxDisplacementPx` 范围内），触发正式睡岗事件并随 `detect.frame` 推送 WebSocket。
@@ -101,11 +101,11 @@ curl -s -X POST http://127.0.0.1:9993/api/control/add \
 
 ## 四、任务一睡岗模型交付与对接规范
 
-将任务一导出的 ONNX 模型放置在 `modelDir` 目录（默认 `runtime/models/sleep_yolopose.onnx`）。  
-若使用自定义文件名，可在 `sva-server.json` 中配置 `sleepModelFile`，无需重新编译分析器。
+将任务一导出的 ONNX 模型放置在 `modelDir` 目录（默认文件名 `runtime/models/yolo11n-pose.onnx`）。
+若使用自定义文件名，可在 `sva-server.json` 中配置 `sleepModelFile`，无需重新编译分析器；旧文件名 `sleep_yolopose.onnx` 仅作为兼容候选，不是唯一契约。
 
-- **输入规格**：`[1, 3, 640, 640]`，BGR 归一化输入。
-- **输出规格**：`[1, 56, 8400]` 或 `[1, 8400, 56]`（4 坐标 + 1 人体置信度 + 17×3 姿态关键点）。
+- **输入规格**：保持 `[1, 3, H, W]`，输入图像来源是 OpenCV BGR；letterbox 后由 `blobFromImage(..., swapRB=true, 1/255)` 形成 RGB/NCHW `float32` 张量。具体固定尺寸由运行时输入节点读取。
+- **输出规格**：只接受 `[1, 56, N]` 或 `[1, N, 56]`（4 坐标 + 1 人体置信度 + 17×3 姿态关键点）；具体 `N`、输入节点名和输出节点名由 ONNX Runtime 实际读取。
 - **示例布控结构**：
 ```json
 {
