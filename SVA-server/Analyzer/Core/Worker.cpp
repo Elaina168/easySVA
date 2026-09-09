@@ -742,10 +742,21 @@ namespace SVAAnalyzer
                         happenScore = 0.0;
 
                         bool shouldInfer = true;
-                        if (control.checkFps > 0.0f)
+                        if (control.detectFps <= -1.5f)
                         {
-                            const int64_t nowMs = getCurTimestamp();
-                            const double intervalMs = 1000.0 / static_cast<double>(control.checkFps);
+                            shouldInfer = false;
+                        }
+                        else if (control.detectFps <= -0.5f)
+                        {
+                            if (!isKeyframe)
+                            {
+                                shouldInfer = false;
+                            }
+                        }
+                        else if (control.detectFps > 0.0f)
+                        {
+                            const int64_t nowMs = getCurTime();
+                            const double intervalMs = 1000.0 / static_cast<double>(control.detectFps);
                             if (runtime->lastInferTimestampMs > 0 &&
                                 static_cast<double>(nowMs - runtime->lastInferTimestampMs) < intervalMs)
                             {

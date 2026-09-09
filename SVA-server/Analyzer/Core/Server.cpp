@@ -237,8 +237,7 @@ void api_controls(struct evhttp_request *req, void *arg)
 {
 
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -251,7 +250,7 @@ void api_controls(struct evhttp_request *req, void *arg)
     std::string result_msg = "error";
     Json::Value result;
 
-    if (reader->parse(buf, buf + std::strlen(buf), &root, &errs) && errs.empty())
+    if (reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) && errs.empty())
     {
 
         std::vector<Control *> controls;
@@ -326,8 +325,7 @@ void api_control(struct evhttp_request *req, void *arg)
 {
 
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -338,7 +336,7 @@ void api_control(struct evhttp_request *req, void *arg)
     int result_code = 0;
     std::string result_msg = "error";
 
-    if (reader->parse(buf, buf + std::strlen(buf), &root, &errs) && errs.empty())
+    if (reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) && errs.empty())
     {
 
         Control *control = NULL;
@@ -391,8 +389,7 @@ void api_control_add(struct evhttp_request *req, void *arg)
 {
 
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -402,7 +399,7 @@ void api_control_add(struct evhttp_request *req, void *arg)
     int result_code = 0;
     std::string result_msg = "error";
 
-    if (reader->parse(buf, buf + std::strlen(buf), &root, &errs) && errs.empty())
+    if (reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) && errs.empty())
     {
         auto tryParseFloat = [](const std::string &text, float &out) -> bool {
             if (text.empty())
@@ -963,8 +960,7 @@ void api_control_add(struct evhttp_request *req, void *arg)
 void api_control_live_output(struct evhttp_request *req, void *arg)
 {
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -978,7 +974,7 @@ void api_control_live_output(struct evhttp_request *req, void *arg)
     {
         result_msg = "scheduler is unavailable";
     }
-    else if (!reader->parse(buf, buf + std::strlen(buf), &root, &errs) || !errs.empty())
+    else if (!reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) || !errs.empty())
     {
         result_msg = "invalid request parameter";
     }
@@ -1034,8 +1030,7 @@ void api_control_cancel(struct evhttp_request *req, void *arg)
 {
 
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -1046,7 +1041,7 @@ void api_control_cancel(struct evhttp_request *req, void *arg)
     int result_code = 0;
     std::string result_msg = "error";
 
-    if (reader->parse(buf, buf + std::strlen(buf), &root, &errs) && errs.empty())
+    if (reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) && errs.empty())
     {
 
         Control control;
@@ -1084,8 +1079,7 @@ void api_control_cancel(struct evhttp_request *req, void *arg)
 void api_alarm_bind_media(struct evhttp_request *req, void *arg)
 {
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -1096,7 +1090,7 @@ void api_alarm_bind_media(struct evhttp_request *req, void *arg)
     int result_code = 0;
     std::string result_msg = "error";
 
-    if (reader->parse(buf, buf + std::strlen(buf), &root, &errs) && errs.empty())
+    if (reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) && errs.empty())
     {
         const std::string controlCode = root.isMember("control_code") ? root["control_code"].asString() : "";
         const std::string alarmId = root.isMember("alarm_id") ? root["alarm_id"].asString() : "";
@@ -1167,40 +1161,37 @@ void parse_get(struct evhttp_request *req, struct evkeyvalq *params)
     evhttp_parse_query_str(query, params);
     evhttp_uri_free(decoded);
 }
+std::string parse_post_str(struct evhttp_request *req)
+{
+    if (req == nullptr || req->input_buffer == nullptr)
+    {
+        return "";
+    }
+    size_t post_size = evbuffer_get_length(req->input_buffer);
+    if (post_size == 0)
+    {
+        return "";
+    }
+    unsigned char *pulled = evbuffer_pullup(req->input_buffer, -1);
+    if (pulled == nullptr)
+    {
+        return "";
+    }
+    return std::string(reinterpret_cast<char *>(pulled), post_size);
+}
+
 void parse_post(struct evhttp_request *req, char *buf)
 {
     if (req == nullptr || buf == nullptr)
     {
         return;
     }
-
-    if (buf)
+    buf[0] = '\0';
+    std::string data = parse_post_str(req);
+    if (!data.empty())
     {
-        buf[0] = '\0';
-    }
-
-    size_t post_size = 0;
-
-    post_size = evbuffer_get_length(req->input_buffer);
-    if (post_size <= 0)
-    {
-        //        printf("====line:%d,post msg is empty!\n",__LINE__);
-        return;
-    }
-    else
-    {
-        size_t copy_len = post_size >= RECV_BUF_MAX_SIZE ? (RECV_BUF_MAX_SIZE - 1) : post_size;
-        unsigned char *pulled = evbuffer_pullup(req->input_buffer, -1);
-        if (pulled == nullptr)
-        {
-            return;
-        }
-        //        printf("====line:%d,post len:%d, copy_len:%d\n",__LINE__,post_size,copy_len);
-        if (copy_len > 0)
-        {
-            memcpy(buf, pulled, copy_len);
-        }
+        size_t copy_len = data.size() >= RECV_BUF_MAX_SIZE ? (RECV_BUF_MAX_SIZE - 1) : data.size();
+        memcpy(buf, data.data(), copy_len);
         buf[copy_len] = '\0';
-        //        printf("====line:%d,post msg:%s\n",__LINE__,buf);
     }
 }

@@ -304,37 +304,43 @@ public class HDeviceServiceImpl implements HDeviceService {
         device.setOrg_index(normalizeOrgIndex(device.getOrg_index()));
         List<HDevice> devices;
         SysUser user = userMapper.selectUserById(userId);
-        SysDept dept = sysDeptMapper.selectDeptById(user.getDeptId());
+        SysDept dept = (user != null && user.getDeptId() != null) ? sysDeptMapper.selectDeptById(user.getDeptId()) : null;
+        String deptOrgIndex = (dept != null && dept.getOrgIndex() != null) ? dept.getOrgIndex() : "";
         List<String> orgIndexs = null;
         if (!com.ruoyi.common.utils.SecurityUtils.isAdmin(userId)) {
             // 如果登录账号不为admin 账号
-            if (device.getOrg_index() == null && !dept.getOrgIndex().equals("10")) {
-                orgIndexs = sysDeptMapper.getOrgIndex(dept.getOrgIndex());
-                orgIndexs.add(dept.getOrgIndex());
+            if (device.getOrg_index() == null && !"10".equals(deptOrgIndex) && !deptOrgIndex.isEmpty()) {
+                orgIndexs = sysDeptMapper.getOrgIndex(deptOrgIndex);
+                if (orgIndexs == null) orgIndexs = new java.util.ArrayList<>();
+                orgIndexs.add(deptOrgIndex);
                 String[] org_index = orgIndexs.toArray(new String[orgIndexs.size()]);
                 device.getParams().put("org_indexs", org_index);
-            } else if (device.getOrg_index() != null && !dept.getOrgIndex().equals("10")) {
+            } else if (device.getOrg_index() != null && !"10".equals(deptOrgIndex)) {
                 orgIndexs = sysDeptMapper.getOrgIndex(device.getOrg_index());
+                if (orgIndexs == null) orgIndexs = new java.util.ArrayList<>();
                 orgIndexs.add(device.getOrg_index());
                 String[] org_index = orgIndexs.toArray(new String[orgIndexs.size()]);
                 device.getParams().put("org_indexs", org_index);
             } else if (device.getOrg_index() != null) {
-                if (!device.getOrg_index().equals("10")) {
+                if (!"10".equals(device.getOrg_index())) {
                     orgIndexs = sysDeptMapper.getOrgIndex(device.getOrg_index());
+                    if (orgIndexs == null) orgIndexs = new java.util.ArrayList<>();
                     orgIndexs.add(device.getOrg_index());
                     String[] org_index = orgIndexs.toArray(new String[orgIndexs.size()]);
                     device.getParams().put("org_indexs", org_index);
                 }
             }
-        } else if (!dept.getOrgIndex().equals("10")) {
+        } else if (!"10".equals(deptOrgIndex) && !deptOrgIndex.isEmpty()) {
             // 如果登录账号不为 hy 账号
             if (device.getOrg_index() == null) {
-                orgIndexs = sysDeptMapper.getOrgIndex(dept.getOrgIndex());
-                orgIndexs.add(dept.getOrgIndex());
+                orgIndexs = sysDeptMapper.getOrgIndex(deptOrgIndex);
+                if (orgIndexs == null) orgIndexs = new java.util.ArrayList<>();
+                orgIndexs.add(deptOrgIndex);
                 String[] org_index = orgIndexs.toArray(new String[orgIndexs.size()]);
                 device.getParams().put("org_indexs", org_index);
             } else {
                 orgIndexs = sysDeptMapper.getOrgIndex(device.getOrg_index());
+                if (orgIndexs == null) orgIndexs = new java.util.ArrayList<>();
                 orgIndexs.add(device.getOrg_index());
                 String[] org_index = orgIndexs.toArray(new String[orgIndexs.size()]);
                 device.getParams().put("org_indexs", org_index);
@@ -342,21 +348,24 @@ public class HDeviceServiceImpl implements HDeviceService {
         } else {
             // 如果登录账号为 hy/admin 账号
             if (device.getOrg_index() != null) {
-                if (!device.getOrg_index().equals("10")) {
+                if (!"10".equals(device.getOrg_index())) {
                     orgIndexs = sysDeptMapper.getOrgIndex(device.getOrg_index());
+                    if (orgIndexs == null) orgIndexs = new java.util.ArrayList<>();
                     orgIndexs.add(device.getOrg_index());
                     String[] org_index = orgIndexs.toArray(new String[orgIndexs.size()]);
                     device.getParams().put("org_indexs", org_index);
                 }
             } else {
-                if (!dept.getOrgIndex().equals("10")) {
-                    orgIndexs = sysDeptMapper.getOrgIndex(device.getOrg_index());
-                    orgIndexs.add(device.getOrg_index());
+                if (!"10".equals(deptOrgIndex) && !deptOrgIndex.isEmpty()) {
+                    orgIndexs = sysDeptMapper.getOrgIndex(deptOrgIndex);
+                    if (orgIndexs == null) orgIndexs = new java.util.ArrayList<>();
+                    orgIndexs.add(deptOrgIndex);
                     String[] org_index = orgIndexs.toArray(new String[orgIndexs.size()]);
                     device.getParams().put("org_indexs", org_index);
-                } else if (!com.ruoyi.common.utils.SecurityUtils.isAdmin(userId)) {
-                    orgIndexs = sysDeptMapper.getOrgIndex(device.getOrg_index());
-                    orgIndexs.add(device.getOrg_index());
+                } else if (!com.ruoyi.common.utils.SecurityUtils.isAdmin(userId) && !deptOrgIndex.isEmpty()) {
+                    orgIndexs = sysDeptMapper.getOrgIndex(deptOrgIndex);
+                    if (orgIndexs == null) orgIndexs = new java.util.ArrayList<>();
+                    orgIndexs.add(deptOrgIndex);
                     String[] org_index = orgIndexs.toArray(new String[orgIndexs.size()]);
                     device.getParams().put("org_indexs", org_index);
                 }
@@ -840,10 +849,30 @@ public class HDeviceServiceImpl implements HDeviceService {
                     exist.setName(gb.getName());
                     changed = true;
                 }
-                String online = normalizeGbStatus(gb.getStatus(), exist.getIs_online());
+                String gbStatus = gb.getStatus();
+                if (gbStatus == null && gb.getOnline() != null) {
+                    gbStatus = gb.getOnline() ? "online" : "offline";
+                }
+                String online = normalizeGbStatus(gbStatus, exist.getIs_online());
                 if (StringUtils.isNotBlank(online) && !online.equals(exist.getIs_online())) {
                     exist.setIs_online(online);
                     changed = true;
+                }
+                // 用心跳时间：GbSipServer 返回 lastHeartbeatAt（Unix秒）
+                if (gb.getLastHeartbeatAt() != null && gb.getLastHeartbeatAt() > 0) {
+                    String hbTime = java.time.LocalDateTime.ofInstant(
+                        java.time.Instant.ofEpochSecond(gb.getLastHeartbeatAt()),
+                        java.time.ZoneId.systemDefault()
+                    ).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                    if (!hbTime.equals(exist.getLast_keepalive_at())) {
+                        exist.setLast_keepalive_at(hbTime);
+                        changed = true;
+                    }
+                } else if ("1".equals(online)) {
+                    if (StringUtils.isBlank(exist.getLast_keepalive_at())) {
+                        exist.setLast_keepalive_at(java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+                        changed = true;
+                    }
                 }
                 if (StringUtils.isNotBlank(gb.getPlayUrl()) && !gb.getPlayUrl().equals(exist.getPlay_url())) {
                     exist.setPlay_url(gb.getPlayUrl());
@@ -943,6 +972,11 @@ public class HDeviceServiceImpl implements HDeviceService {
                 dto.setName(StringUtils.isNotBlank(ua) ? ua : deviceId);
                 dto.setPlatformId(gbPlatformId);
                 dto.setStatus(dev.path("online").asBoolean(false) ? "online" : "offline");
+                dto.setOnline(dev.path("online").asBoolean(false));
+                long hb = dev.path("last_heartbeat_at").asLong(0);
+                if (hb > 0) dto.setLastHeartbeatAt(hb);
+                long reg = dev.path("last_register_at").asLong(0);
+                if (reg > 0) dto.setLastRegisterAt(reg);
                 String streamId = deviceStreamMap.get(deviceId);
                 if (StringUtils.isNotBlank(streamId) && httpPort != null && httpPort > 0) {
                     dto.setStreamId(streamId);

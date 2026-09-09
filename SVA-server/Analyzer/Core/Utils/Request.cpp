@@ -40,7 +40,7 @@ namespace SVAAnalyzer
         std::unordered_map<std::string, WsConnection> gWsConnections;
         const char *kWebSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
         constexpr int64_t kWsPingIntervalMs = 3000;
-        constexpr int64_t kWsStaleReconnectMs = 4500;
+        constexpr int64_t kWsStaleReconnectMs = 60000;
 
         bool startsWith(const std::string &value, const char *prefix)
         {
@@ -408,15 +408,15 @@ namespace SVAAnalyzer
     inline size_t onWrite(void *buffer, size_t size, size_t nmemb, void *stream)
     {
 
-        std::string *str = dynamic_cast<std::string *>((std::string *)stream);
+        std::string *str = static_cast<std::string *>(stream);
         if (NULL == str || NULL == buffer)
         {
-            return -1;
+            return 0;
         }
 
         char *pData = (char *)buffer;
         str->append(pData, size * nmemb);
-        return nmemb;
+        return size * nmemb;
     }
     /*
     inline size_t onWrite(void* ptr, size_t size, size_t nmEmb, void* stream) {
@@ -480,7 +480,6 @@ namespace SVAAnalyzer
     }
     bool Request::post(const char *url, const char *data, std::string &response)
     {
-        curl_global_init(CURL_GLOBAL_WIN32);
 
         CURL *curl = curl_easy_init();
         bool result;
@@ -532,7 +531,6 @@ namespace SVAAnalyzer
             result = false;
         }
         curl_easy_cleanup(curl);
-        curl_global_cleanup();
         return result;
     }
 

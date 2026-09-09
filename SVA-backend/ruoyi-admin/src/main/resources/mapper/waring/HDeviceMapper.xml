@@ -29,6 +29,7 @@
         <result property="monitor_status" column="monitor_status"/>
         <result property="create_time" column="create_time"/>
         <result property="update_time" column="update_time"/>
+        <result property="last_keepalive_at" column="last_keepalive_at"/>
     </resultMap>
 
     <sql id="selectDeviceVo">
@@ -119,6 +120,7 @@
             <if test="sva_server_id != null">sva_server_id = #{sva_server_id},</if>
             <if test="monitor_status != null and monitor_status != ''">monitor_status = #{monitor_status},</if>
             <if test="update_time != null">update_time = #{update_time},</if>
+            <if test="last_keepalive_at != null">last_keepalive_at = #{last_keepalive_at},</if>
         </set>
         WHERE ape_id = #{ape_id}
     </update>

@@ -453,9 +453,11 @@ export default {
             type: 'flv',
             url: url,
             isLive: true,
-            cors: true
+            cors: true,
+            hasAudio: false
           }, {
             enableWorker: false,
+            enableStashBuffer: false,
             lazyLoad: false,
             stashInitialSize: 128,
             autoCleanupSourceBuffer: true,

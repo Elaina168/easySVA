@@ -73,15 +73,25 @@ public class WebSocketUsers
 
     public static void sendMessageToUserByText(Session session, String message)
     {
-        if (session != null)
+        if (session != null && session.isOpen())
         {
             try
             {
-                session.getBasicRemote().sendText(message);
+                synchronized (session)
+                {
+                    if (session.isOpen())
+                    {
+                        session.getBasicRemote().sendText(message);
+                    }
+                }
             }
             catch (IOException e)
             {
                 LOGGER.error("\n[发送消息异常]", e);
+            }
+            catch (IllegalStateException e)
+            {
+                LOGGER.warn("\n[WebSocket状态异常: {}]", e.getMessage());
             }
         }
         else
