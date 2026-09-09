@@ -317,7 +317,7 @@ class PsRtpPusher:
             process.wait(timeout=2)
 
     def _command(self) -> List[str]:
-        command = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-re"]
+        command = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-re", "-fflags", "+genpts"]
         if self.source:
             command.extend(["-stream_loop", "-1", "-i", str(self.source)])
         else:
@@ -367,7 +367,7 @@ class PsRtpPusher:
         try:
             transport = self._transport()
             self._process = subprocess.Popen(
-                self._command(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self._command(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             assert self._process.stdout is not None
             for pack in iter_ps_packs(self._chunks(self._process.stdout)):
                 timestamp = int((time.monotonic() - started) * 90000)
@@ -387,7 +387,7 @@ class PsRtpPusher:
             if process:
                 process.wait(timeout=2)
                 if process.returncode not in (0, -signal.SIGTERM) and not self._stop.is_set():
-                    error = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+                    error = "(stderr suppressed)"
                     print(f"media generator stopped: {error.strip()}", flush=True)
 
 

@@ -560,6 +560,13 @@ public class HDeviceServiceImpl implements HDeviceService {
         }
 
         String previewPlayUrl = normalizeBrowserPlayUrl(device.getPlay_url());
+        // 国标设备：用转桥后的 live 流（ape_id 固定），rtp 源流时间戳为0导致前端卡加载
+        if ("gb28181".equalsIgnoreCase(device.getDevice_type())) {
+            ZlmServer zlmServer = resolveEnabledZlmServer(device);
+            if (zlmServer != null && zlmServer.getMedia_http_port() != null) {
+                previewPlayUrl = "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/live/" + device.getApe_id() + ".live.flv";
+            }
+        }
         if (StringUtils.isBlank(previewPlayUrl)) {
             previewPlayUrl = "";
             if (DEVICE_TYPE_RTSP.equalsIgnoreCase(device.getDevice_type())
