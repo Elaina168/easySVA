@@ -37,6 +37,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Pattern;
+import java.nio.charset.StandardCharsets;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.util.UUID;
 
 
 @Service
@@ -1028,5 +1033,165 @@ public class HDeviceServiceImpl implements HDeviceService {
         device.setZlm_server_id(zlmServer.getId());
         device.setSva_server_id(1L);
         return device;
+    }
+
+    /**
+     * 云台控制 (PTZ) - 支持 GB28181 标准 8 字节 Hex 指令与 SIP 报文，以及通用设备
+     */
+    @Override
+    public Map<String, Object> ptzControl(String apeId, String command, Integer speed) {
+        if (StringUtils.isBlank(apeId)) {
+            throw new ServiceException("设备标识 (apeId) 不能为空");
+        }
+        HDevice device = selectDeviceByApeId(apeId);
+        if (device == null) {
+            throw new ServiceException("未找到该设备: " + apeId);
+        }
+
+        String cmd = (command != null) ? command.trim().toLowerCase(Locale.ROOT) : "stop";
+        int pSpeed = (speed != null && speed > 0 && speed <= 255) ? speed : 32;
+        int tSpeed = pSpeed;
+        int zSpeed = Math.min(15, Math.max(1, pSpeed / 16));
+
+        byte b1 = (byte) 0xA5; // 首字节 0xA5
+        byte b2 = (byte) 0x0F; // 组合码
+        byte b3 = (byte) 0x01; // 地址高位/通道
+        byte b4 = 0x00;        // 指令码
+        byte b5 = 0x00;        // 水平速度
+        byte b6 = 0x00;        // 垂直速度
+        byte b7 = 0x00;        // 变焦速度高4位
+        String actionDesc = "停止/复位 (Stop/Reset)";
+
+        switch (cmd) {
+            case "up":
+                b4 = 0x08;
+                b6 = (byte) tSpeed;
+                actionDesc = "向上仰视 (Tilt Up)";
+                break;
+            case "down":
+                b4 = 0x04;
+                b6 = (byte) tSpeed;
+                actionDesc = "向下俯视 (Tilt Down)";
+                break;
+            case "left":
+                b4 = 0x02;
+                b5 = (byte) pSpeed;
+                actionDesc = "向左旋转 (Pan Left)";
+                break;
+            case "right":
+                b4 = 0x01;
+                b5 = (byte) pSpeed;
+                actionDesc = "向右旋转 (Pan Right)";
+                break;
+            case "upleft":
+                b4 = 0x0A;
+                b5 = (byte) pSpeed;
+                b6 = (byte) tSpeed;
+                actionDesc = "左上旋转 (Pan/Tilt Up-Left)";
+                break;
+            case "upright":
+                b4 = 0x09;
+                b5 = (byte) pSpeed;
+                b6 = (byte) tSpeed;
+                actionDesc = "右上旋转 (Pan/Tilt Up-Right)";
+                break;
+            case "downleft":
+                b4 = 0x06;
+                b5 = (byte) pSpeed;
+                b6 = (byte) tSpeed;
+                actionDesc = "左下旋转 (Pan/Tilt Down-Left)";
+                break;
+            case "downright":
+                b4 = 0x05;
+                b5 = (byte) pSpeed;
+                b6 = (byte) tSpeed;
+                actionDesc = "右下旋转 (Pan/Tilt Down-Right)";
+                break;
+            case "zoomin":
+                b4 = 0x10;
+                b7 = (byte) ((zSpeed & 0x0F) << 4);
+                actionDesc = "焦距放大 (Zoom In)";
+                break;
+            case "zoomout":
+                b4 = 0x20;
+                b7 = (byte) ((zSpeed & 0x0F) << 4);
+                actionDesc = "焦距缩小 (Zoom Out)";
+                break;
+            case "stop":
+            case "reset":
+            default:
+                b4 = 0x00;
+                actionDesc = "停止/复位 (Stop/Reset)";
+                break;
+        }
+
+        int sum = ((b1 & 0xFF) + (b2 & 0xFF) + (b3 & 0xFF) + (b4 & 0xFF) + (b5 & 0xFF) + (b6 & 0xFF) + (b7 & 0xFF)) % 256;
+        byte b8 = (byte) sum;
+        byte[] ptzBytes = new byte[]{b1, b2, b3, b4, b5, b6, b7, b8};
+        StringBuilder sb = new StringBuilder();
+        for (byte b : ptzBytes) {
+            sb.append(String.format("%02X", b));
+        }
+        String ptzCmdHex = sb.toString();
+
+        // 若为国标设备或包含国标设备号，组装 SIP MESSAGE 并通过 UDP 发送至设备/模拟器
+        String targetDeviceId = StringUtils.isNotBlank(device.getGb_device_id()) ? device.getGb_device_id() : "34020000001320000001";
+        String targetIp = StringUtils.isNotBlank(device.getIp_addr()) ? device.getIp_addr() : "127.0.0.1";
+        int targetPort = (device.getPort() != null && device.getPort() > 0) ? device.getPort() : 15060;
+
+        boolean sipSent = false;
+        try {
+            sendGb28181PtzSipMessage(targetIp, targetPort, targetDeviceId, ptzCmdHex);
+            sipSent = true;
+            log.info("[PTZ] 国标云台指令已下发: apeId={}, target={}:{}, cmd={}, hex={}",
+                    apeId, targetIp, targetPort, cmd, ptzCmdHex);
+        } catch (Exception e) {
+            log.warn("[PTZ] 下发国标 SIP PTZ 报文异常: {}", e.getMessage());
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("apeId", apeId);
+        result.put("command", cmd);
+        result.put("speed", pSpeed);
+        result.put("ptzCmd", ptzCmdHex);
+        result.put("action", actionDesc);
+        result.put("deviceType", device.getDevice_type());
+        result.put("sipSent", sipSent);
+        result.put("targetHost", targetIp + ":" + targetPort);
+        return result;
+    }
+
+    private void sendGb28181PtzSipMessage(String host, int port, String deviceId, String ptzCmdHex) {
+        String sn = String.valueOf(System.currentTimeMillis() % 1000000);
+        String xmlBody = "<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n" +
+                "<Control>\r\n" +
+                "<CmdType>DeviceControl</CmdType>\r\n" +
+                "<SN>" + sn + "</SN>\r\n" +
+                "<DeviceID>" + deviceId + "</DeviceID>\r\n" +
+                "<PTZCmd>" + ptzCmdHex + "</PTZCmd>\r\n" +
+                "</Control>\r\n";
+
+        byte[] bodyBytes = xmlBody.getBytes(StandardCharsets.UTF_8);
+        String sipMsg = "MESSAGE sip:" + deviceId + "@" + host + ":" + port + " SIP/2.0\r\n" +
+                "Via: SIP/2.0/UDP 127.0.0.1:5060;rport;branch=z9hG4bK" + System.currentTimeMillis() + "\r\n" +
+                "From: <sip:34020000002000000001@127.0.0.1:5060>;tag=" + (System.currentTimeMillis() % 100000) + "\r\n" +
+                "To: <sip:" + deviceId + "@" + host + ":" + port + ">\r\n" +
+                "Call-ID: " + UUID.randomUUID().toString() + "@127.0.0.1\r\n" +
+                "CSeq: 1 MESSAGE\r\n" +
+                "Content-Type: Application/MANSCDP+xml\r\n" +
+                "Max-Forwards: 70\r\n" +
+                "User-Agent: SVA-Backend-GB28181\r\n" +
+                "Content-Length: " + bodyBytes.length + "\r\n\r\n" +
+                xmlBody;
+
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.setSoTimeout(1000);
+            byte[] sendData = sipMsg.getBytes(StandardCharsets.UTF_8);
+            InetAddress address = InetAddress.getByName(host);
+            DatagramPacket packet = new DatagramPacket(sendData, sendData.length, address, port);
+            socket.send(packet);
+        } catch (Exception ex) {
+            log.warn("[PTZ] UDP SIP 报文发送异常: host={}, port={}, err={}", host, port, ex.getMessage());
+        }
     }
 }

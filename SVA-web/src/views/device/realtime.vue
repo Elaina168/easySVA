@@ -35,6 +35,14 @@
 
         <el-button
           size="small"
+          :type="showPtzPanel ? 'primary' : 'default'"
+          icon="el-icon-aim"
+          style="margin-left: 12px;"
+          @click="showPtzPanel = !showPtzPanel"
+        >云台控制 (PTZ)</el-button>
+
+        <el-button
+          size="small"
           icon="el-icon-full-screen"
           type="info"
           plain
@@ -156,10 +164,18 @@
                 v-show="slot.playUrl"
                 :ref="`videoSlot_${index}`"
                 class="slot-video-element"
+                :style="getSlotVideoStyle(index)"
                 muted
                 autoplay
                 playsinline
               ></video>
+
+              <!-- 电子云台动作实时反馈浮层 -->
+              <transition name="el-fade-in-linear">
+                <div v-if="slot.ptzLastAction" class="ptz-action-badge">
+                  <i class="el-icon-aim"></i> {{ slot.ptzLastAction }}
+                </div>
+              </transition>
 
               <!-- 加载中遮罩 -->
               <div v-if="slot.loading" class="slot-overlay loading-overlay">
@@ -185,6 +201,138 @@
           </div>
         </div>
       </div>
+
+      <!-- 右侧云台控制侧栏 (PTZ Control Panel) -->
+      <transition name="el-zoom-in-right">
+        <div class="ptz-sidebar" v-show="showPtzPanel">
+          <div class="ptz-sidebar-header">
+            <span class="ptz-title">
+              <i class="el-icon-aim"></i> 云台控制 (PTZ)
+            </span>
+            <el-button
+              type="text"
+              icon="el-icon-close"
+              size="mini"
+              @click="showPtzPanel = false"
+            ></el-button>
+          </div>
+
+          <!-- 当前选中监控画面信息 -->
+          <div class="ptz-target-info">
+            <div class="target-title">
+              <span class="target-badge">窗口 {{ currentSlotIndex + 1 }}</span>
+              <span class="target-name" :title="currentSelectedSlot.title || '空闲'">
+                {{ currentSelectedSlot.title || '未选中监控窗口' }}
+              </span>
+            </div>
+            <div class="target-meta">
+              <el-tag size="mini" :type="currentDeviceType === 'gb28181' ? 'success' : 'info'">
+                {{ currentDeviceType === 'gb28181' ? 'GB28181 国标协议' : 'RTSP/直连流' }}
+              </el-tag>
+              <span class="ptz-coord">
+                缩放: {{ (currentSlotPtz.zoom).toFixed(1) }}x | X: {{ currentSlotPtz.panX }}px
+              </span>
+            </div>
+          </div>
+
+          <!-- 八向云台雷盘控制器 -->
+          <div class="ptz-disc-wrapper">
+            <div class="ptz-disc">
+              <button class="ptz-btn ptz-up" title="向上仰视" @click="handlePtz('up')">
+                <i class="el-icon-top"></i>
+              </button>
+              <button class="ptz-btn ptz-down" title="向下俯视" @click="handlePtz('down')">
+                <i class="el-icon-bottom"></i>
+              </button>
+              <button class="ptz-btn ptz-left" title="向左旋转" @click="handlePtz('left')">
+                <i class="el-icon-back"></i>
+              </button>
+              <button class="ptz-btn ptz-right" title="向右旋转" @click="handlePtz('right')">
+                <i class="el-icon-right"></i>
+              </button>
+
+              <button class="ptz-btn ptz-upleft" title="左上" @click="handlePtz('upleft')">
+                <i class="el-icon-top-left"></i>
+              </button>
+              <button class="ptz-btn ptz-upright" title="右上" @click="handlePtz('upright')">
+                <i class="el-icon-top-right"></i>
+              </button>
+              <button class="ptz-btn ptz-downleft" title="左下" @click="handlePtz('downleft')">
+                <i class="el-icon-bottom-left"></i>
+              </button>
+              <button class="ptz-btn ptz-downright" title="右下" @click="handlePtz('downright')">
+                <i class="el-icon-bottom-right"></i>
+              </button>
+
+              <!-- 中心刹车 / 停止 -->
+              <button class="ptz-center-btn" title="停止 / 刹车" @click="handlePtz('stop')">
+                <i class="el-icon-video-pause"></i>
+                <span>STOP</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 镜头变焦控制 (Zoom In / Out) 与 复位 -->
+          <div class="ptz-zoom-section">
+            <div class="section-label">镜头拉伸 / 变焦：</div>
+            <div class="zoom-btn-row">
+              <el-button
+                type="primary"
+                plain
+                size="small"
+                icon="el-icon-zoom-in"
+                @click="handlePtz('zoomin')"
+              >放大 (+)</el-button>
+              <el-button
+                type="primary"
+                plain
+                size="small"
+                icon="el-icon-zoom-out"
+                @click="handlePtz('zoomout')"
+              >缩小 (-)</el-button>
+              <el-button
+                type="info"
+                plain
+                size="small"
+                icon="el-icon-refresh-left"
+                @click="handlePtz('reset')"
+              >复位</el-button>
+            </div>
+          </div>
+
+          <!-- 步长与转速滑块 (Speed 1-255) -->
+          <div class="ptz-speed-section">
+            <div class="speed-label-row">
+              <span class="section-label">云台转速：</span>
+              <span class="speed-value">{{ ptzSpeed }}</span>
+            </div>
+            <el-slider
+              v-model="ptzSpeed"
+              :min="1"
+              :max="255"
+              :step="5"
+              size="small"
+            ></el-slider>
+          </div>
+
+          <!-- 国标 8 字节指令实时监控回显 -->
+          <div class="ptz-log-section">
+            <div class="section-label">国标协议指令回显 (GB/T 28181)：</div>
+            <div class="ptz-hex-terminal">
+              <div class="hex-line" v-if="lastPtzHex">
+                <span class="hex-tag">PTZCmd:</span>
+                <span class="hex-code">{{ lastPtzHex }}</span>
+              </div>
+              <div class="hex-desc" v-if="lastPtzDesc">
+                <i class="el-icon-check"></i> {{ lastPtzDesc }}
+              </div>
+              <div class="hex-placeholder" v-if="!lastPtzHex">
+                等待下发控制指令...
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
     </div>
 
     <!-- 视图 2：设备数据表格管理视图 (兼容原有功能) -->
@@ -293,6 +441,7 @@ import { getDeviceList, previewDeviceMonitor, startDeviceMonitor, stopDeviceMoni
 import { upsertScreenWallStream } from '@/api/screenWall'
 import player from '@/components/RTSPPlayer'
 import { extractPlayableUrl, isBrowserPlayableUrl, isFlvUrl } from '@/utils/mediaPlayback'
+import { ptzControl } from '@/api/ptz'
 
 export default {
   name: 'DeviceRealtimeMonitor',
@@ -313,8 +462,15 @@ export default {
         playUrl: '',
         flvPlayer: null,
         loading: false,
-        error: ''
+        error: '',
+        ptz: { panX: 0, panY: 0, zoom: 1.0 },
+        ptzLastAction: ''
       })),
+      showPtzPanel: true,
+      ptzSpeed: 32,
+      lastPtzHex: '',
+      lastPtzDesc: '就绪，点击方向盘控制镜头',
+
       autoPreviewInitialized: false,
       queryParams: {
         pageNum: 1,
@@ -334,6 +490,19 @@ export default {
   computed: {
     activeSlots() {
       return this.slotsData.slice(0, this.splitCount)
+    },
+    currentSelectedSlot() {
+      return this.slotsData[this.currentSlotIndex] || {}
+    },
+    currentSlotPtz() {
+      return (this.currentSelectedSlot && this.currentSelectedSlot.ptz) || { panX: 0, panY: 0, zoom: 1.0 }
+    },
+    currentDevice() {
+      const apeId = this.currentSelectedSlot ? this.currentSelectedSlot.deviceId : ''
+      return this.deviceList.find(d => this.getApeId(d) === apeId) || null
+    },
+    currentDeviceType() {
+      return this.currentDevice ? (this.currentDevice.device_type || 'gb28181') : 'gb28181'
     },
     filteredDevices() {
       return this.deviceList.filter(item => {
@@ -362,6 +531,107 @@ export default {
     this.stopAllSlots()
   },
   methods: {
+    getSlotVideoStyle(index) {
+      const slot = this.slotsData[index]
+      const ptz = (slot && slot.ptz) ? slot.ptz : { panX: 0, panY: 0, zoom: 1.0 }
+      return {
+        transform: `scale(${ptz.zoom}) translate(${ptz.panX}px, ${ptz.panY}px)`,
+        transition: 'transform 0.22s cubic-bezier(0.2, 0, 0, 1)',
+        transformOrigin: 'center center'
+      }
+    },
+    async handlePtz(command) {
+      const slot = this.slotsData[this.currentSlotIndex]
+      if (!slot || !slot.deviceId) {
+        this.$modal.msgWarning('请先在窗口中播放监控设备')
+        return
+      }
+
+      if (!slot.ptz) {
+        this.$set(slot, 'ptz', { panX: 0, panY: 0, zoom: 1.0 })
+      }
+
+      const speed = this.ptzSpeed || 32
+      const step = Math.max(10, Math.round(18 * (speed / 32)))
+
+      // 数字电子云台平移与变焦计算
+      switch (command) {
+        case 'up':
+          slot.ptz.panY = Math.max(slot.ptz.panY - step, -280)
+          break
+        case 'down':
+          slot.ptz.panY = Math.min(slot.ptz.panY + step, 280)
+          break
+        case 'left':
+          slot.ptz.panX = Math.max(slot.ptz.panX - step, -280)
+          break
+        case 'right':
+          slot.ptz.panX = Math.min(slot.ptz.panX + step, 280)
+          break
+        case 'upleft':
+          slot.ptz.panX = Math.max(slot.ptz.panX - step, -280)
+          slot.ptz.panY = Math.max(slot.ptz.panY - step, -280)
+          break
+        case 'upright':
+          slot.ptz.panX = Math.min(slot.ptz.panX + step, 280)
+          slot.ptz.panY = Math.max(slot.ptz.panY - step, -280)
+          break
+        case 'downleft':
+          slot.ptz.panX = Math.max(slot.ptz.panX - step, -280)
+          slot.ptz.panY = Math.min(slot.ptz.panY + step, 280)
+          break
+        case 'downright':
+          slot.ptz.panX = Math.min(slot.ptz.panX + step, 280)
+          slot.ptz.panY = Math.min(slot.ptz.panY + step, 280)
+          break
+        case 'zoomin':
+          slot.ptz.zoom = Math.min(+(slot.ptz.zoom + 0.25).toFixed(2), 3.5)
+          break
+        case 'zoomout':
+          slot.ptz.zoom = Math.max(+(slot.ptz.zoom - 0.25).toFixed(2), 1.0)
+          break
+        case 'reset':
+          slot.ptz.panX = 0
+          slot.ptz.panY = 0
+          slot.ptz.zoom = 1.0
+          break
+        case 'stop':
+        default:
+          break
+      }
+
+      const actionLabels = {
+        up: '向上仰视 (Tilt Up)',
+        down: '向下俯视 (Tilt Down)',
+        left: '向左旋转 (Pan Left)',
+        right: '向右旋转 (Pan Right)',
+        upleft: '左上旋转',
+        upright: '右上旋转',
+        downleft: '左下旋转',
+        downright: '右下旋转',
+        zoomin: '镜头放大 (Zoom In)',
+        zoomout: '镜头缩小 (Zoom Out)',
+        stop: '停止 (Stop)',
+        reset: '复位至中心 (Reset)'
+      }
+
+      const desc = actionLabels[command] || command
+      this.$set(slot, 'ptzLastAction', desc)
+      if (slot.ptzActionTimer) clearTimeout(slot.ptzActionTimer)
+      slot.ptzActionTimer = setTimeout(() => {
+        this.$set(slot, 'ptzLastAction', '')
+      }, 1600)
+
+      try {
+        const res = await ptzControl(slot.deviceId, { command, speed })
+        if (res && res.data) {
+          this.lastPtzHex = res.data.ptzCmd || ''
+          this.lastPtzDesc = `${res.data.action || desc} (速度: ${speed})`
+        }
+      } catch (err) {
+        console.warn('[PTZ] 指令发送失败:', err)
+      }
+    },
     changeSplit(count) {
       this.splitCount = count
       if (this.currentSlotIndex >= count) {
@@ -1103,4 +1373,265 @@ export default {
   padding: 16px;
   overflow-y: auto;
 }
+
+/* PTZ 云台控制侧栏样式 */
+.ptz-sidebar {
+  width: 270px;
+  background-color: #1a2236;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+.ptz-sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #2d3748;
+  margin-bottom: 12px;
+}
+
+.ptz-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ptz-target-info {
+  background: #111827;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 14px;
+  border: 1px solid #273549;
+}
+
+.target-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.target-badge {
+  background: #2563eb;
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.target-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ptz-coord {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* 八向雷盘 */
+.ptz-disc-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 12px 0 16px;
+}
+
+.ptz-disc {
+  position: relative;
+  width: 176px;
+  height: 176px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #1a2234 0%, #0d131f 100%);
+  border: 2px solid #2d3d5a;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.ptz-btn {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #3d4f70;
+  background: #182234;
+  color: #93c5fd;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+}
+
+.ptz-btn:hover {
+  background: #2563eb;
+  color: #fff;
+  border-color: #3b82f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
+  transform: scale(1.1);
+}
+
+.ptz-btn:active {
+  transform: scale(0.95);
+}
+
+.ptz-up { top: 6px; left: 70px; }
+.ptz-down { bottom: 6px; left: 70px; }
+.ptz-left { left: 6px; top: 70px; }
+.ptz-right { right: 6px; top: 70px; }
+.ptz-upleft { top: 20px; left: 20px; }
+.ptz-upright { top: 20px; right: 20px; }
+.ptz-downleft { bottom: 20px; left: 20px; }
+.ptz-downright { bottom: 20px; right: 20px; }
+
+.ptz-center-btn {
+  position: absolute;
+  top: 58px;
+  left: 58px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: #111827;
+  border: 2px solid #ef4444;
+  color: #ef4444;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: bold;
+  transition: all 0.2s;
+  outline: none;
+}
+
+.ptz-center-btn span {
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+.ptz-center-btn:hover {
+  background: #ef4444;
+  color: #fff;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.7);
+}
+
+/* 变焦拉伸 */
+.ptz-zoom-section,
+.ptz-speed-section,
+.ptz-log-section {
+  margin-bottom: 14px;
+}
+
+.section-label {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.zoom-btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.zoom-btn-row .el-button {
+  flex: 1;
+  padding: 8px 6px;
+}
+
+/* 速度滑块 */
+.speed-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.speed-value {
+  font-size: 12px;
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+/* 终端回显 */
+.ptz-hex-terminal {
+  background: #090d16;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 11px;
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.hex-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.hex-tag {
+  color: #64748b;
+}
+
+.hex-code {
+  color: #34d399;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.hex-desc {
+  color: #38bdf8;
+  font-size: 11px;
+}
+
+.hex-placeholder {
+  color: #475569;
+  font-style: italic;
+}
+
+/* 视频画面内 PTZ 动作反馈 */
+.ptz-action-badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #38bdf8;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 10;
+  pointer-events: none;
+}
+
 </style>

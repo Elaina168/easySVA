@@ -591,6 +591,38 @@ class GbDeviceSimulator:
         match = re.search(r"<SN>\s*([^<]+)\s*</SN>", body, re.IGNORECASE)
         self.send_catalog(match.group(1).strip() if match else None)
 
+    def handle_device_control(self, request: SipMessage) -> None:
+        self.send_response(self.response(request, 200, "OK"))
+        body = request.body.decode("utf-8", errors="replace")
+        ptz_match = re.search(r"<PTZCmd>\s*([0-9A-Fa-f]+)\s*</PTZCmd>", body, re.IGNORECASE)
+        ptz_cmd = ptz_match.group(1).upper() if ptz_match else ""
+        action_name = "未知动作"
+        pan_speed = 0
+        tilt_speed = 0
+        zoom_speed = 0
+        if len(ptz_cmd) == 16:
+            code = int(ptz_cmd[6:8], 16)
+            pan_speed = int(ptz_cmd[8:10], 16)
+            tilt_speed = int(ptz_cmd[10:12], 16)
+            zoom_speed = int(ptz_cmd[12:14], 16) & 0x0F
+            actions = {
+                0x00: "停止 (Stop)",
+                0x08: "向上俯仰 (Tilt Up)",
+                0x04: "向下俯仰 (Tilt Down)",
+                0x02: "向左旋转 (Pan Left)",
+                0x01: "向右旋转 (Pan Right)",
+                0x0A: "左上旋转 (Pan Up-Left)",
+                0x09: "右上旋转 (Pan Up-Right)",
+                0x06: "左下旋转 (Pan Down-Left)",
+                0x05: "右下旋转 (Pan Down-Right)",
+                0x10: "镜头焦距放大 (Zoom In)",
+                0x20: "镜头焦距缩小 (Zoom Out)",
+            }
+            action_name = actions.get(code, f"指令码 0x{code:02X}")
+        print(f"[PTZ-CONTROL] 收到国标云台控制指令: PTZCmd={ptz_cmd}, 动作={action_name}, 水平速度={pan_speed}, 垂直速度={tilt_speed}, 变焦速度={zoom_speed}", flush=True)
+
+
+
     def handle_invite(self, request: SipMessage) -> None:
         call_id = request.header("Call-ID")
         pusher: Optional[PsRtpPusher] = None
@@ -657,6 +689,8 @@ class GbDeviceSimulator:
         method = request.method.upper()
         if method == "MESSAGE" and "<CmdType>Catalog</CmdType>" in request.body.decode("utf-8", errors="replace"):
             self.handle_catalog_query(request)
+        elif method == "MESSAGE" and "<CmdType>DeviceControl</CmdType>" in request.body.decode("utf-8", errors="replace"):
+            self.handle_device_control(request)
         elif method == "INVITE":
             self.handle_invite(request)
         elif method == "ACK":
