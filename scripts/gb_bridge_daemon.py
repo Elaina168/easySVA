@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-easySVA 双国标流动态转桥与高可用自愈守护服务
+easySVA 双国标流动态转桥与高可用自愈守护服务 (增强版)
+- 实时同步 GbSipServer 注册状态，设备离线时不发起盲目点播，杜绝 404/409 刷屏
 - 监控 GbSipServer 会话与 ZLMediaKit RTP 流
 - 自动将设备1与设备2的国标 RTP 流实时转为零延迟规范 live FLV 流
 - 自愈机制：当 ZLMediaKit 超时关闭 RTP 服务器或流中断时，自动清理并重启会话
@@ -31,11 +32,12 @@ DEVICES = [
 ]
 
 ZLM_API = "http://127.0.0.1:9992/index/api/getMediaList?secret=V3522025zlm0aA9ajn7UiOWi&app=rtp"
+GBSIP_DEVICES = "http://127.0.0.1:18080/gb28181/api/devices"
 GBSIP_SESSIONS = "http://127.0.0.1:18080/gb28181/api/sessions"
 GBSIP_START = "http://127.0.0.1:18080/gb28181/api/live/start"
 GBSIP_STOP = "http://127.0.0.1:18080/gb28181/api/live/stop"
 
-# channel_id -> { "proc": Popen, "stream_id": str, "missing_count": int }
+# channel_id -> { "proc": Popen, "stream_id": str, "missing_count": int, "was_online": bool, "last_start_attempt": float }
 bridges = {}
 
 
@@ -44,13 +46,23 @@ def log(msg: str):
     print(f"[{timestamp}] [BridgeDaemon] {msg}", flush=True)
 
 
+def get_online_devices():
+    try:
+        req = urllib.request.Request(GBSIP_DEVICES)
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode('utf-8')).get('data', [])
+            return {d.get('device_id') for d in data if d.get('online')}
+    except Exception:
+        return set()
+
+
 def get_active_rtp_streams():
     try:
         req = urllib.request.Request(ZLM_API)
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode('utf-8')).get('data', [])
             return {s.get('stream') for s in data if s.get('schema') == 'rtsp'}
-    except Exception as e:
+    except Exception:
         return set()
 
 
@@ -145,13 +157,21 @@ log("启动 easySVA 高可用双国标转推守护服务...")
 
 while True:
     try:
+        online_devices = get_online_devices()
         active_rtp = get_active_rtp_streams()
+
         for dev in DEVICES:
             ch = dev["channel_id"]
             dev_id = dev["device_id"]
             target = dev["target_stream"]
 
-            b = bridges.setdefault(ch, {"proc": None, "stream_id": None, "missing_count": 0})
+            b = bridges.setdefault(ch, {
+                "proc": None,
+                "stream_id": None,
+                "missing_count": 0,
+                "was_online": None,
+                "last_start_attempt": 0
+            })
             proc = b["proc"]
 
             # 1. 检查并清理僵尸进程 (reap defunct)
@@ -160,14 +180,34 @@ while True:
                 b["proc"] = None
                 log(f"{dev['name']} 转推进程已退出 (code={proc.returncode})")
 
-            # 2. 查询 GbSipServer 会话
+            # 2. 检查设备在线状态
+            is_online = (dev_id in online_devices)
+            if not is_online:
+                if b.get("was_online") is not False:
+                    log(f"{dev['name']} 处于离线/未注册状态，停止转推")
+                    b["was_online"] = False
+                if proc is not None:
+                    kill_proc(proc)
+                    b["proc"] = None
+                b["stream_id"] = None
+                b["missing_count"] = 0
+                continue
+            else:
+                if b.get("was_online") is False:
+                    log(f"{dev['name']} 恢复在线，开始调度会话")
+                b["was_online"] = True
+
+            # 3. 查询 GbSipServer 会话
             sid, sess_id = get_session_info(ch)
             if not sid:
-                # 无活跃会话，触发开启
-                trigger_live_start(dev_id, ch)
+                now = time.time()
+                # 防抖：至少间隔 5 秒尝试一次，防止 409 Conflict 请求风暴
+                if now - b.get("last_start_attempt", 0) >= 5.0:
+                    b["last_start_attempt"] = now
+                    trigger_live_start(dev_id, ch)
                 continue
 
-            # 3. 检查 RTP 流是否在 ZLM 中活跃
+            # 4. 检查 RTP 流是否在 ZLM 中活跃
             if sid not in active_rtp:
                 b["missing_count"] += 1
                 # 若连续 3 次 (6秒) 查不到该 RTP 流，说明 ZLM 已超时回收该 RTP 端口
@@ -182,13 +222,13 @@ while True:
             else:
                 b["missing_count"] = 0
 
-            # 4. 若 stream_id 改变，重启对应转推进程
+            # 5. 若 stream_id 改变，重启对应转推进程
             if b["proc"] is not None and b["stream_id"] != sid:
                 log(f"{dev['name']} stream_id 改变: {b['stream_id']} -> {sid}，重启转推进程...")
                 kill_proc(b["proc"])
                 b["proc"] = None
 
-            # 5. 启动或维持转推进程
+            # 6. 启动或维持转推进程
             if b["proc"] is None:
                 log(f"启动转推: {dev['name']} rtp/{sid} -> live/{target}")
                 time.sleep(0.3)  # 避开 RTMP publish 锁

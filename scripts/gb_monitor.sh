@@ -2,14 +2,16 @@
 # ============================================================
 # 国标 GB28181 设备专项监控（SIP 注册 / 心跳 / 点播会话 / 信令 / 云台PTZ）
 # 每 INTERVAL 秒刷新；Ctrl+C 退出，只读不影响设备与服务。
-#   bash /opt/SVA-dev/gb_monitor.sh
-#   ONESHOT=1 bash /opt/SVA-dev/gb_monitor.sh   # 单帧自检
+#   bash gb_monitor.sh
+#   ONESHOT=1 bash gb_monitor.sh   # 单帧自检
 # SVA 本地服务(ZLM/后端/Analyzer/数据库等)请看 sva_monitor.sh
 # ============================================================
 
 INTERVAL=2
 GBAPI="http://127.0.0.1:18080"
-SIMLOG="/opt/SVA-dev/simulator.log"
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SIMLOG="$BASE_DIR/simulator.log"
+SIMLOG2="$BASE_DIR/simulator_webcam.log"
 HB_TIMEOUT=45        # 心跳15s一次，超过45s(3周期)判异常
 
 R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; C=$'\033[36m'; B=$'\033[1m'; D=$'\033[2m'; N=$'\033[0m'
@@ -24,12 +26,11 @@ draw(){
 
   # ---- 日志侧统计(设备视角信令) ----
   local hb_cnt reg_cnt ptz_cnt inv_cnt last_hb
-  [[ -r "$SIMLOG" ]] || { echo "${R}模拟器日志不存在: $SIMLOG（国标设备可能未启动）${N}"; sleep 2; return; }
-  hb_cnt=$(grep -c "heartbeat sent" "$SIMLOG" 2>/dev/null)
-  reg_cnt=$(grep -c "SIP registered" "$SIMLOG" 2>/dev/null)
-  ptz_cnt=$(grep -c "PTZ-CONTROL" "$SIMLOG" 2>/dev/null)
-  inv_cnt=$(grep -c "INVITE accepted" "$SIMLOG" 2>/dev/null)
-  last_hb=$(grep "heartbeat sent" "$SIMLOG" 2>/dev/null | tail -1 | grep -oE "SN=[0-9]+")
+  hb_cnt=$(grep -h -c "heartbeat sent" "$SIMLOG" "$SIMLOG2" 2>/dev/null | awk '{s+=$1} END {print s+0}')
+  reg_cnt=$(grep -h -c "SIP registered" "$SIMLOG" "$SIMLOG2" 2>/dev/null | awk '{s+=$1} END {print s+0}')
+  ptz_cnt=$(grep -h -c "PTZ-CONTROL" "$SIMLOG" "$SIMLOG2" 2>/dev/null | awk '{s+=$1} END {print s+0}')
+  inv_cnt=$(grep -h -c "INVITE accepted" "$SIMLOG" "$SIMLOG2" 2>/dev/null | awk '{s+=$1} END {print s+0}')
+  last_hb=$(cat "$SIMLOG" "$SIMLOG2" 2>/dev/null | grep "heartbeat sent" | tail -1 | grep -oE "SN=[0-9]+")
 
   printf '\033[2J\033[H'
   printf "${C}${B}════════════ 国标 GB28181 设备监控 %s 每%ds刷新 ════════════${N}\n" "$NOW" "$INTERVAL"
@@ -76,11 +77,11 @@ PYEOF
          "${reg_cnt:-0}" "${hb_cnt:-0}" "${last_hb:-无}" "${inv_cnt:-0}" "${ptz_cnt:-0}"
 
   printf "${B}【最近关键 SIP 信令(设备侧, 去心跳刷屏)】${N}\n"
-  grep -vE "heartbeat sent" "$SIMLOG" 2>/dev/null | tail -8 | sed 's/^/  /'
+  cat "$SIMLOG" "$SIMLOG2" 2>/dev/null | grep -vE "heartbeat sent" | tail -8 | sed 's/^/  /'
 
   printf "${B}【最近云台 PTZ 指令】${N}\n"
   local ptz
-  ptz=$(grep "PTZ-CONTROL" "$SIMLOG" 2>/dev/null | tail -4 | sed 's/.*PTZCmd=\([A-F0-9]*\), 动作=\(.*\), 水平.*/    [PTZ] \1  \2/')
+  ptz=$(cat "$SIMLOG" "$SIMLOG2" 2>/dev/null | grep "PTZ-CONTROL" | tail -4 | sed 's/.*PTZCmd=\([A-F0-9]*\), 动作=\(.*\), 水平.*/    [PTZ] \1  \2/')
   if [[ -n "$ptz" ]]; then echo "$ptz"; else printf "  ${D}暂无云台指令${N}\n"; fi
 
   printf "${D}──────────────────────────────────────────────────────────────────${N}\n"
