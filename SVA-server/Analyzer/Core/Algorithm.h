@@ -1,4 +1,4 @@
-﻿#ifndef ANALYZER_ALGORITHM_H
+#ifndef ANALYZER_ALGORITHM_H
 #define ANALYZER_ALGORITHM_H
 
 #include <string>
@@ -100,6 +100,10 @@ namespace SVAAnalyzer
 
     public:
         virtual bool objectDetect(cv::Mat &image, std::vector<DetectObject> &detects) = 0;
+        virtual void setDetectionConfidence(float val) {}
+        virtual float getDetectionConfidence() const { return 0.35f; }
+        virtual void setNmsThreshold(float val) {}
+        virtual float getNmsThreshold() const { return 0.45f; }
         bool createState();
 
     protected:

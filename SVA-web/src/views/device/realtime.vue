@@ -51,6 +51,15 @@
 
         <el-button
           size="small"
+          type="success"
+          plain
+          icon="el-icon-set-up"
+          style="margin-left: 12px;"
+          @click="showAlgoTuning = true"
+        >算法灵敏度</el-button>
+
+        <el-button
+          size="small"
           icon="el-icon-full-screen"
           type="info"
           plain
@@ -439,6 +448,9 @@
       title="实时监控预览"
       @closeProof="viewProof = false"
     />
+
+    <!-- YOLO-Pose 算法灵敏度动态调参（热加载） -->
+    <AlgorithmConfigModal :visible.sync="showAlgoTuning" :target-device="currentDevice" />
   </div>
 </template>
 
@@ -451,10 +463,11 @@ import player from '@/components/RTSPPlayer'
 import { extractPlayableUrl, isBrowserPlayableUrl, isFlvUrl } from '@/utils/mediaPlayback'
 import { ptzControl } from '@/api/ptz'
 import webcamPusher from '@/utils/webcamPusher'
+import AlgorithmConfigModal from '@/views/algorithm/components/AlgorithmConfigModal.vue'
 
 export default {
   name: 'DeviceRealtimeMonitor',
-  components: { player },
+  components: { player, AlgorithmConfigModal },
   data() {
     return {
       activeView: 'grid', // 'grid' (分屏监控) 或 'table' (设备列表)
@@ -480,6 +493,7 @@ export default {
       webcamSocket: null,
       webcamRecorder: null,
       showPtzPanel: true,
+      showAlgoTuning: false, // 算法灵敏度热加载弹窗
       ptzSpeed: 32,
       lastPtzHex: '',
       lastPtzDesc: '就绪，点击方向盘控制镜头',

@@ -333,7 +333,7 @@ namespace SVAAnalyzer
         for (int prediction = 0; prediction < mPredictionCount; ++prediction)
         {
             const float confidence = valueAt(4, prediction);
-            if (!std::isfinite(confidence) || confidence < DETECTION_CONFIDENCE)
+            if (!std::isfinite(confidence) || confidence < mDetectionConfidence)
             {
                 continue;
             }
@@ -387,8 +387,8 @@ namespace SVAAnalyzer
         std::vector<int> keptIndices;
         cv::dnn::NMSBoxes(boxes,
                           confidences,
-                          DETECTION_CONFIDENCE,
-                          NMS_IOU_THRESHOLD,
+                          mDetectionConfidence,
+                          mNmsThreshold,
                           keptIndices);
         detects.reserve(keptIndices.size());
         for (const int keptIndex : keptIndices)

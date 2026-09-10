@@ -1,4 +1,4 @@
-﻿#ifndef ANALYZER_SCHEDULER_H
+#ifndef ANALYZER_SCHEDULER_H
 #define ANALYZER_SCHEDULER_H
 #include <map>
 #include <mutex>
@@ -22,6 +22,7 @@ namespace SVAAnalyzer
 	class Worker;
 	class Algorithm;
 	struct Control;
+	struct BehaviorRuleConfig;
 	struct AlarmImage;
 	struct Alarm;
 	
@@ -315,6 +316,12 @@ namespace SVAAnalyzer
 		 * @brief Update temporal tracking state for a stream.
 		 * Called from Worker after inference to enrich detections with track IDs and trails.
 		 */
+		bool updateAlgorithmConfig(const std::string &controlCode,
+								  const BehaviorRuleConfig &rule,
+								  float scoreThreshold,
+								  float nmsThreshold,
+								  std::vector<std::string> &updatedControls,
+								  std::string &msg);
 		void updateTemporalTracks(const Control &control,
 								  const std::string &streamCode,
 								  std::vector<DetectObject *> detects,

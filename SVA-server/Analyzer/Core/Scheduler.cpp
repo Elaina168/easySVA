@@ -2174,6 +2174,63 @@ namespace SVAAnalyzer
      * - speed, direction, motion state
      * - region enter/exit/dwell states
      */
+    bool Scheduler::updateAlgorithmConfig(const std::string &controlCode,
+                                         const BehaviorRuleConfig &rule,
+                                         float scoreThreshold,
+                                         float nmsThreshold,
+                                         std::vector<std::string> &updatedControls,
+                                         std::string &msg)
+    {
+        // 1. Update ONNX Runtime detection thresholds if specified
+        if (scoreThreshold > 0.0f)
+        {
+            if (on_yolo11n_pose) on_yolo11n_pose->setDetectionConfidence(scoreThreshold);
+            if (on_yolo11n_80) on_yolo11n_80->setDetectionConfidence(scoreThreshold);
+        }
+        if (nmsThreshold > 0.0f)
+        {
+            if (on_yolo11n_pose) on_yolo11n_pose->setNmsThreshold(nmsThreshold);
+            if (on_yolo11n_80) on_yolo11n_80->setNmsThreshold(nmsThreshold);
+        }
+
+        // 2. Broadcast or target update to active workers
+        std::lock_guard<std::mutex> lock(mWorkerMapMtx);
+        std::unordered_set<Worker *> visitedWorkers;
+        bool anyWorkerUpdated = false;
+
+        for (auto &pair : mWorkerMap)
+        {
+            Worker *worker = pair.second;
+            if (!worker || visitedWorkers.count(worker))
+            {
+                continue;
+            }
+            visitedWorkers.insert(worker);
+
+            std::string subMsg;
+            if (worker->updateAlgorithmConfig(controlCode, rule, scoreThreshold, nmsThreshold, updatedControls, subMsg))
+            {
+                anyWorkerUpdated = true;
+            }
+        }
+
+        if (anyWorkerUpdated || !updatedControls.empty())
+        {
+            msg = "algorithm config updated";
+            return true;
+        }
+
+        // If no active worker matched but thresholds were updated globally
+        if (scoreThreshold > 0.0f || nmsThreshold > 0.0f)
+        {
+            msg = "global algorithm detection thresholds updated";
+            return true;
+        }
+
+        msg = "no matching control found to update";
+        return false;
+    }
+
     void Scheduler::updateTemporalTracks(const Control &control,
                                           const std::string &streamCode,
                                           std::vector<DetectObject *> detects,
