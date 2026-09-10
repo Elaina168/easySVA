@@ -46,6 +46,7 @@
  * ============================================================
  */
 
+#include <curl/curl.h>
 #include "Core/Config.h"
 #include "Core/Scheduler.h"
 #include "Core/Server.h"
@@ -55,6 +56,7 @@ using namespace SVAAnalyzer;
 
 int main(int argc, char **argv)
 {
+    curl_global_init(CURL_GLOBAL_ALL);
 #ifdef WIN32
 	srand(time(NULL));
 #endif
@@ -133,5 +135,6 @@ int main(int argc, char **argv)
 	server.start(&scheduler);
 	scheduler.loop();
 
-	return 0;
+	curl_global_cleanup();
+    return 0;
 }

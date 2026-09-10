@@ -84,23 +84,23 @@ RUN=$($MYSQL -N -e "SELECT monitor_status FROM h_device WHERE ape_id='$APE';" 2>
 check "$RUN" "RUNNING" "GB 设备启动后 monitor_status=RUNNING"
 $MYSQL -e "DELETE FROM h_device WHERE ape_id='$APE';" 2>/dev/null
 
-# 6) ZLM 请求失败时保留原状态（不误置离线）—— 受控修改 ZLM api_port，结束后恢复
+# 6) ZLM/GB 请求失败时保留原状态（不误置离线）—— 受控修改 ZLM host，结束后恢复
 APE_F=verify_gb_fail
 $MYSQL -e "DELETE FROM h_device WHERE ape_id='$APE_F';" 2>/dev/null
 $MYSQL -e "INSERT INTO h_device (ape_id, name, stream_source_type, device_type, gb_device_id, is_online, monitor_status, zlm_server_id, sva_server_id, create_time, update_time) VALUES
  ('$APE_F','验证失败保留状态','DIRECT','gb28181','34020000001320000903','1','STOPPED',1,1,NOW(),NOW());" 2>/dev/null
-OLD_PORT=$($MYSQL -N -e "SELECT api_port FROM zlm_server WHERE id=1 LIMIT 1;" 2>/dev/null)
-if [ -n "$OLD_PORT" ]; then
-  # 无论脚本正常/异常退出都恢复 ZLM 端口
-  trap "$MYSQL -e \"UPDATE zlm_server SET api_port=$OLD_PORT WHERE id=1;\" >/dev/null 2>&1" EXIT
-  $MYSQL -e "UPDATE zlm_server SET api_port=1 WHERE id=1;" 2>/dev/null
+OLD_HOST=$($MYSQL -N -e "SELECT host FROM zlm_server WHERE id=1 LIMIT 1;" 2>/dev/null)
+if [ -n "$OLD_HOST" ]; then
+  # 无论脚本正常/异常退出都恢复 ZLM host
+  trap "$MYSQL -e \"UPDATE zlm_server SET host='$OLD_HOST' WHERE id=1;\" >/dev/null 2>&1" EXIT
+  $MYSQL -e "UPDATE zlm_server SET host='127.0.0.254' WHERE id=1;" 2>/dev/null
   curl -s -X POST "$B/waring/device/gb28181/sync" -H "Authorization: Bearer $TOKEN" > /dev/null
   FAIL_ON=$($MYSQL -N -e "SELECT is_online FROM h_device WHERE ape_id='$APE_F';" 2>/dev/null)
   check "$FAIL_ON" "1" "ZLM 请求失败时保留原状态（不误置离线）"
-  $MYSQL -e "UPDATE zlm_server SET api_port=$OLD_PORT WHERE id=1;" 2>/dev/null
+  $MYSQL -e "UPDATE zlm_server SET host='$OLD_HOST' WHERE id=1;" 2>/dev/null
   trap - EXIT
 else
-  bad "无法读取 zlm_server.api_port，跳过失败场景"
+  bad "无法读取 zlm_server.host，跳过失败场景"
 fi
 $MYSQL -e "DELETE FROM h_device WHERE ape_id='$APE_F';" 2>/dev/null
 

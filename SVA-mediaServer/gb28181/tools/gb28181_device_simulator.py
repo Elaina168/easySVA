@@ -327,8 +327,9 @@ class PsRtpPusher:
             ])
         command.extend([
             "-map", "0:v:0", "-an", "-c:v", "libx264", "-preset", "ultrafast",
-            "-tune", "zerolatency", "-pix_fmt", "yuv420p", "-g", str(self.frame_rate),
-            "-bf", "0", "-f", "mpeg", "-muxdelay", "0", "-muxpreload", "0",
+            "-tune", "zerolatency", "-pix_fmt", "yuv420p",
+            "-r", str(self.frame_rate), "-g", str(self.frame_rate),
+            "-bf", "0", "-f", "vob",
             "-flush_packets", "1", "pipe:1",
         ])
         return command
@@ -362,17 +363,32 @@ class PsRtpPusher:
 
     def _run(self) -> None:
         sequence = random.randrange(0, 65536)
-        started = time.monotonic()
         transport: Optional[socket.socket] = None
+        current_pts = 0
+
+        def extract_pts(pack: bytes) -> Optional[int]:
+            pos = pack.find(b"\x00\x00\x01\xe2")
+            if pos < 0:
+                pos = pack.find(b"\x00\x00\x01\xe0")
+            if pos >= 0 and len(pack) > pos + 14:
+                flags = pack[pos + 7]
+                if ((flags >> 6) & 0x03) in (2, 3):
+                    p = pack[pos + 9 : pos + 14]
+                    return (((p[0] >> 1) & 0x07) << 30) | (p[1] << 22) | (((p[2] >> 1) & 0x7F) << 15) | (p[3] << 7) | (p[4] >> 1)
+            return None
+
         try:
             transport = self._transport()
             self._process = subprocess.Popen(
                 self._command(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             assert self._process.stdout is not None
             for pack in iter_ps_packs(self._chunks(self._process.stdout)):
-                timestamp = int((time.monotonic() - started) * 90000)
+                pts = extract_pts(pack)
+                if pts is not None:
+                    current_pts = pts & 0xFFFFFFFF
+
                 for packet, sequence in packetize_rtp(
-                    pack, self.offer.payload_type, sequence, timestamp, self.offer.ssrc
+                    pack, self.offer.payload_type, sequence, current_pts, self.offer.ssrc
                 ):
                     if self._stop.is_set():
                         return
@@ -470,7 +486,7 @@ class GbDeviceSimulator:
             self.handle_message(message)
         raise TimeoutError("SIP transaction timed out")
 
-    def register(self, expires: int) -> None:
+    def register(self, expires: int, retry_on_unauthorized: bool = True) -> None:
         sequence = self.next_cseq()
         authorization = ""
         if self.challenge:
@@ -484,9 +500,9 @@ class GbDeviceSimulator:
         self.send(request)
         response = self.receive_response(
             self.register_call_id, sequence, self.args.transaction_timeout)
-        if response.status_code == 401 and not authorization:
+        if response.status_code == 401 and retry_on_unauthorized:
             self.challenge = response.header("WWW-Authenticate")
-            self.register(expires)
+            self.register(expires, retry_on_unauthorized=False)
             return
         if response.status_code != 200:
             raise RuntimeError(f"REGISTER failed with SIP {response.status_code}")
@@ -575,6 +591,38 @@ class GbDeviceSimulator:
         match = re.search(r"<SN>\s*([^<]+)\s*</SN>", body, re.IGNORECASE)
         self.send_catalog(match.group(1).strip() if match else None)
 
+    def handle_device_control(self, request: SipMessage) -> None:
+        self.send_response(self.response(request, 200, "OK"))
+        body = request.body.decode("utf-8", errors="replace")
+        ptz_match = re.search(r"<PTZCmd>\s*([0-9A-Fa-f]+)\s*</PTZCmd>", body, re.IGNORECASE)
+        ptz_cmd = ptz_match.group(1).upper() if ptz_match else ""
+        action_name = "未知动作"
+        pan_speed = 0
+        tilt_speed = 0
+        zoom_speed = 0
+        if len(ptz_cmd) == 16:
+            code = int(ptz_cmd[6:8], 16)
+            pan_speed = int(ptz_cmd[8:10], 16)
+            tilt_speed = int(ptz_cmd[10:12], 16)
+            zoom_speed = int(ptz_cmd[12:14], 16) & 0x0F
+            actions = {
+                0x00: "停止 (Stop)",
+                0x08: "向上俯仰 (Tilt Up)",
+                0x04: "向下俯仰 (Tilt Down)",
+                0x02: "向左旋转 (Pan Left)",
+                0x01: "向右旋转 (Pan Right)",
+                0x0A: "左上旋转 (Pan Up-Left)",
+                0x09: "右上旋转 (Pan Up-Right)",
+                0x06: "左下旋转 (Pan Down-Left)",
+                0x05: "右下旋转 (Pan Down-Right)",
+                0x10: "镜头焦距放大 (Zoom In)",
+                0x20: "镜头焦距缩小 (Zoom Out)",
+            }
+            action_name = actions.get(code, f"指令码 0x{code:02X}")
+        print(f"[PTZ-CONTROL] 收到国标云台控制指令: PTZCmd={ptz_cmd}, 动作={action_name}, 水平速度={pan_speed}, 垂直速度={tilt_speed}, 变焦速度={zoom_speed}", flush=True)
+
+
+
     def handle_invite(self, request: SipMessage) -> None:
         call_id = request.header("Call-ID")
         pusher: Optional[PsRtpPusher] = None
@@ -641,6 +689,8 @@ class GbDeviceSimulator:
         method = request.method.upper()
         if method == "MESSAGE" and "<CmdType>Catalog</CmdType>" in request.body.decode("utf-8", errors="replace"):
             self.handle_catalog_query(request)
+        elif method == "MESSAGE" and "<CmdType>DeviceControl</CmdType>" in request.body.decode("utf-8", errors="replace"):
+            self.handle_device_control(request)
         elif method == "INVITE":
             self.handle_invite(request)
         elif method == "ACK":
@@ -659,7 +709,10 @@ class GbDeviceSimulator:
 
     def run(self) -> None:
         self.register(self.args.register_expires)
-        self.send_keepalive()
+        if not self.args.drop_heartbeat:
+            self.send_keepalive()
+        else:
+            print("[DROP-HEARTBEAT] 已停止发送心跳，设备将在超时后被标记为离线", flush=True)
         self.send_catalog()
         next_heartbeat = time.monotonic() + self.args.heartbeat_interval
         next_refresh = time.monotonic() + max(1.0, self.args.register_expires * 0.8)
@@ -668,7 +721,10 @@ class GbDeviceSimulator:
             while self.running and (deadline is None or time.monotonic() < deadline):
                 now = time.monotonic()
                 if now >= next_heartbeat:
-                    self.send_keepalive()
+                    if not self.args.drop_heartbeat:
+                        self.send_keepalive()
+                    else:
+                        print(f"[DROP-HEARTBEAT] 跳过心跳 (t={int(now)}s)，设备保持离线状态", flush=True)
                     next_heartbeat = now + self.args.heartbeat_interval
                 if now >= next_refresh:
                     self.register(self.args.register_expires)
@@ -716,6 +772,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--password", default="12345678")
     parser.add_argument("--register-expires", type=int, default=3600)
     parser.add_argument("--heartbeat-interval", type=float, default=30.0)
+    parser.add_argument("--drop-heartbeat", action="store_true", help="停止发送心跳，模拟设备异常离线")
     parser.add_argument("--transaction-timeout", type=float, default=5.0)
     parser.add_argument("--run-seconds", type=float, default=0.0,
                         help="stop automatically after this many seconds; zero runs until Ctrl+C")

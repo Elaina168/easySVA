@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Setter;
 
 /**
@@ -34,4 +35,16 @@ public class GbDeviceDTO {
 
     /** 播放地址 */
     private String playUrl;
+
+    /** 最后心跳时间（Unix时间戳） */
+    @JsonProperty("last_heartbeat_at")
+    private Long lastHeartbeatAt;
+
+    /** 最后注册时间（Unix时间戳） */
+    @JsonProperty("last_register_at")
+    private Long lastRegisterAt;
+
+    /** 在线状态（布尔） */
+    @JsonProperty("online")
+    private Boolean online;
 }

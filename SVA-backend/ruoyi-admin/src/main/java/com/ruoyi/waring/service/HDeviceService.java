@@ -33,4 +33,6 @@ public interface HDeviceService {
     int stopMonitor(String apeId);
 
     Map<String, Object> previewMonitor(String apeId);
+
+    Map<String, Object> ptzControl(String apeId, String command, Integer speed);
 }

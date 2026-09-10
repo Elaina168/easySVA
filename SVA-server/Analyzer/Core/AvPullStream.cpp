@@ -181,16 +181,21 @@ namespace SVAAnalyzer
             // mVideoCodecCtx->thread_count = 1;
 
             mVideoStream = mFmtCtx->streams[mWorker->mControl->videoIndex];
-            if (0 == mVideoStream->avg_frame_rate.den)
+            if (0 == mVideoStream->avg_frame_rate.den || mVideoStream->avg_frame_rate.num <= 0)
             {
 
-                LOGE("videoIndex=%d,videoStream->avg_frame_rate.den = 0", mWorker->mControl->videoIndex);
+                LOGI("videoIndex=%d, invalid avg_frame_rate %d/%d, fallback to 25fps",
+                     mWorker->mControl->videoIndex, mVideoStream->avg_frame_rate.num, mVideoStream->avg_frame_rate.den);
 
                 mWorker->mControl->videoFps = 25;
             }
             else
             {
                 mWorker->mControl->videoFps = mVideoStream->avg_frame_rate.num / mVideoStream->avg_frame_rate.den;
+                if (mWorker->mControl->videoFps <= 0)
+                {
+                    mWorker->mControl->videoFps = 25;
+                }
             }
 
             mWorker->mControl->videoWidth = mVideoCodecCtx->width;

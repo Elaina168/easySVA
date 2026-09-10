@@ -42,4 +42,7 @@ public class HDevice extends BaseEntity {
     private String monitor_status;
     private String create_time;
     private String update_time;
+
+    /** 最后心跳时间 */
+    private String last_keepalive_at;
 }
