@@ -4,17 +4,17 @@ echo "=================================================="
 echo "正在模拟国标设备通电并注册上线..."
 echo "=================================================="
 
-VIDEO_SRC="/mnt/c/Users/34964/Desktop/191d76c9e59b1434832ff7f5cbba252a.mp4"
+VIDEO_SRC="/opt/SVA-dev/media/sleep_source.mp4"
 
 # 使用 sudo bash -c 执行，确保重定向日志文件时不会发生 Permission denied
-sudo bash -c "nohup python3 /opt/SVA/SVA-backend/SVA-mediaServer/gb28181/tools/gb28181_device_simulator.py \
+sudo bash -c "nohup python3 /opt/SVA-dev/SVA-backend/SVA-mediaServer/gb28181/tools/gb28181_device_simulator.py \
   --device-id 34020000001320000001 \
   --channel-id 34020000001320000002 \
   --platform-id 34020000002000000001 \
   --password 12345678 \
   --realm 3402000000 \
   --input '$VIDEO_SRC' \
-  --heartbeat-interval 15 > /opt/SVA/simulator.log 2>&1 &"
+  --heartbeat-interval 15 > /opt/SVA-dev/simulator.log 2>&1 &"
 
 # 等待模拟器完成 SIP 注册握手
 sleep 2

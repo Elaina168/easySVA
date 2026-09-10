@@ -2,14 +2,14 @@
 # ============================================================
 # 国标 GB28181 设备专项监控（SIP 注册 / 心跳 / 点播会话 / 信令 / 云台PTZ）
 # 每 INTERVAL 秒刷新；Ctrl+C 退出，只读不影响设备与服务。
-#   bash /opt/SVA/gb_monitor.sh
-#   ONESHOT=1 bash /opt/SVA/gb_monitor.sh   # 单帧自检
+#   bash /opt/SVA-dev/gb_monitor.sh
+#   ONESHOT=1 bash /opt/SVA-dev/gb_monitor.sh   # 单帧自检
 # SVA 本地服务(ZLM/后端/Analyzer/数据库等)请看 sva_monitor.sh
 # ============================================================
 
 INTERVAL=2
 GBAPI="http://127.0.0.1:18080"
-SIMLOG="/opt/SVA/simulator.log"
+SIMLOG="/opt/SVA-dev/simulator.log"
 HB_TIMEOUT=45        # 心跳15s一次，超过45s(3周期)判异常
 
 R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; C=$'\033[36m'; B=$'\033[1m'; D=$'\033[2m'; N=$'\033[0m'

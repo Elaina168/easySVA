@@ -317,12 +317,18 @@ class PsRtpPusher:
             process.wait(timeout=2)
 
     def _command(self) -> List[str]:
-        command = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-re", "-fflags", "+genpts"]
+        command = [self.ffmpeg, "-hide_banner", "-loglevel", "warning", "-fflags", "+genpts"]
         if self.source:
-            command.extend(["-stream_loop", "-1", "-i", str(self.source)])
+            s_str = str(self.source)
+            if s_str.startswith("rtsp://"):
+                command.extend(["-rtsp_transport", "tcp", "-i", s_str])
+            elif s_str.startswith(("rtmp://", "http://")):
+                command.extend(["-i", s_str])
+            else:
+                command.extend(["-re", "-stream_loop", "-1", "-i", s_str])
         else:
             command.extend([
-                "-f", "lavfi", "-i",
+                "-re", "-f", "lavfi", "-i",
                 f"testsrc2=size={self.width}x{self.height}:rate={self.frame_rate}",
             ])
         command.extend([
@@ -377,34 +383,44 @@ class PsRtpPusher:
                     return (((p[0] >> 1) & 0x07) << 30) | (p[1] << 22) | (((p[2] >> 1) & 0x7F) << 15) | (p[3] << 7) | (p[4] >> 1)
             return None
 
-        try:
-            transport = self._transport()
-            self._process = subprocess.Popen(
-                self._command(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            assert self._process.stdout is not None
-            for pack in iter_ps_packs(self._chunks(self._process.stdout)):
-                pts = extract_pts(pack)
-                if pts is not None:
-                    current_pts = pts & 0xFFFFFFFF
+        while not self._stop.is_set():
+            transport: Optional[socket.socket] = None
+            try:
+                transport = self._transport()
+                self._process = subprocess.Popen(
+                    self._command(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                assert self._process.stdout is not None
+                for pack in iter_ps_packs(self._chunks(self._process.stdout)):
+                    pts = extract_pts(pack)
+                    if pts is not None:
+                        current_pts = pts & 0xFFFFFFFF
 
-                for packet, sequence in packetize_rtp(
-                    pack, self.offer.payload_type, sequence, current_pts, self.offer.ssrc
-                ):
-                    if self._stop.is_set():
-                        return
-                    self._send_packet(transport, packet)
-                    self.packet_count += 1
-        finally:
-            if transport:
-                transport.close()
-            process = self._process
-            if process and process.poll() is None:
-                process.terminate()
-            if process:
-                process.wait(timeout=2)
-                if process.returncode not in (0, -signal.SIGTERM) and not self._stop.is_set():
-                    error = "(stderr suppressed)"
-                    print(f"media generator stopped: {error.strip()}", flush=True)
+                    for packet, sequence in packetize_rtp(
+                        pack, self.offer.payload_type, sequence, current_pts, self.offer.ssrc
+                    ):
+                        if self._stop.is_set():
+                            return
+                        self._send_packet(transport, packet)
+                        self.packet_count += 1
+            except Exception:
+                pass
+            finally:
+                if transport:
+                    try:
+                        transport.close()
+                    except Exception:
+                        pass
+                process = self._process
+                if process and process.poll() is None:
+                    process.terminate()
+                if process:
+                    try:
+                        process.wait(timeout=2)
+                    except Exception:
+                        pass
+            if self._stop.is_set():
+                break
+            time.sleep(1)
 
 
 class GbDeviceSimulator:
@@ -461,7 +477,7 @@ class GbDeviceSimulator:
             ("CSeq", f"{sequence} {method}"),
             ("Max-Forwards", "70"),
             ("Contact", f"<sip:{self.args.device_id}@{self.args.advertised_ip}:{self.args.device_port}>"),
-            ("User-Agent", "easySVA-GB28181-simulator/1.0"),
+            ("User-Agent", getattr(self.args, "channel_name", None) or "easySVA-GB28181-simulator/1.0"),
         ]
         if expires is not None:
             headers.append(("Expires", str(expires)))
@@ -777,8 +793,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-seconds", type=float, default=0.0,
                         help="stop automatically after this many seconds; zero runs until Ctrl+C")
     parser.add_argument("--ffmpeg", default="ffmpeg")
-    parser.add_argument("--input", type=Path,
-                        help="loop this input video instead of the generated test pattern")
+    parser.add_argument("--input", type=str,
+                        help="loop this input video or RTSP stream instead of the generated test pattern")
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=360)
     parser.add_argument("--frame-rate", type=int, default=25)
@@ -793,8 +809,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise SystemExit("--realm must contain exactly 10 decimal digits")
     if args.register_expires < 1 or args.heartbeat_interval <= 0:
         raise SystemExit("registration and heartbeat intervals must be positive")
-    if args.input and not args.input.is_file():
-        raise SystemExit(f"input video does not exist: {args.input}")
+    if args.input and not (str(args.input).startswith(("rtsp://", "rtmp://", "http://")) or os.path.isfile(str(args.input))):
+        raise SystemExit(f"input video or stream does not exist: {args.input}")
     simulator = GbDeviceSimulator(args)
     signal.signal(signal.SIGINT, lambda _signum, _frame: simulator.stop())
     signal.signal(signal.SIGTERM, lambda _signum, _frame: simulator.stop())
