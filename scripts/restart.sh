@@ -13,6 +13,11 @@ echo "[1/7] 停止现有所有易构服务..."
 pkill -f "gb_bridge_daemon" 2>/dev/null || true
 pkill -f "webcam_bridge" 2>/dev/null || true
 pkill -f "gb28181_device_simulator.py" 2>/dev/null || true
+if [ -f /tmp/webcam_dev2.guard.pid ]; then
+  kill -TERM "$(cat /tmp/webcam_dev2.guard.pid 2>/dev/null)" 2>/dev/null || true
+  rm -f /tmp/webcam_dev2.guard.pid
+fi
+pkill -f "webcam_gb_online.sh" 2>/dev/null || true
 pkill -f "ffmpeg.*sleep_test" 2>/dev/null || true
 pkill -f "ffmpeg.*0100000016" 2>/dev/null || true
 pkill -f "ffmpeg.*34020000001320000003" 2>/dev/null || true

@@ -30,6 +30,11 @@ namespace SVAAnalyzer
         bool isGpuEnabled() const { return mGpuEnabled; }
         const std::string &getActiveProvider() const { return mActiveProvider; }
 
+        float getDetectionConfidence() const { return mDetectionConfidence; }
+        void setDetectionConfidence(float val) { mDetectionConfidence = std::max(0.01f, std::min(val, 0.99f)); }
+        float getNmsThreshold() const { return mNmsThreshold; }
+        void setNmsThreshold(float val) { mNmsThreshold = std::max(0.01f, std::min(val, 0.99f)); }
+
     private:
         std::string mModelPath;
         std::string mAlgorithmCode;
@@ -43,6 +48,8 @@ namespace SVAAnalyzer
         std::vector<int64_t> mOutputDims;
         bool mGpuEnabled = false;
         std::string mActiveProvider = "CPU";
+        float mDetectionConfidence = 0.35f;
+        float mNmsThreshold = 0.45f;
         Ort::Env mEnv{nullptr};
         Ort::SessionOptions mSessionOptions{nullptr};
         Ort::Session mSession{nullptr};
@@ -57,6 +64,11 @@ namespace SVAAnalyzer
         ~AlgorithmOnYoloPose() override;
 
         bool objectDetect(cv::Mat &image, std::vector<DetectObject> &detects) override;
+
+        void setDetectionConfidence(float val) override { if (mEngine) mEngine->setDetectionConfidence(val); }
+        float getDetectionConfidence() const override { return mEngine ? mEngine->getDetectionConfidence() : 0.35f; }
+        void setNmsThreshold(float val) override { if (mEngine) mEngine->setNmsThreshold(val); }
+        float getNmsThreshold() const override { return mEngine ? mEngine->getNmsThreshold() : 0.45f; }
 
     private:
         PoseOnnxRuntimeEngine *mEngine = nullptr;

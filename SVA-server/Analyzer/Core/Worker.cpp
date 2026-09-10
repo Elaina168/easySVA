@@ -1,4 +1,4 @@
-﻿#include "Worker.h"
+#include "Worker.h"
 #include "Algorithm.h"
 #include "Analyzer.h"
 #include "AvPullStream.h"
@@ -406,6 +406,67 @@ namespace SVAAnalyzer
 
         msg = "live output updated";
         return true;
+    }
+
+    bool Worker::updateAlgorithmConfig(const std::string &code,
+                                      const BehaviorRuleConfig &newRule,
+                                      float scoreThreshold,
+                                      float nmsThreshold,
+                                      std::vector<std::string> &appliedControlCodes,
+                                      std::string &msg)
+    {
+        std::lock_guard<std::mutex> lock(mControlRuntimesMtx);
+        bool anyUpdated = false;
+        for (auto &pair : mControlRuntimes)
+        {
+            if (code.empty() || code == "*" || pair.first == code)
+            {
+                if (!pair.second || !pair.second->control)
+                {
+                    continue;
+                }
+                Control *ctrl = pair.second->control;
+                bool found = false;
+                for (auto &r : ctrl->behaviorRules)
+                {
+                    if (r.behaviorType == "sleep")
+                    {
+                        if (newRule.keypointConfidence > 0) r.keypointConfidence = newRule.keypointConfidence;
+                        if (newRule.thresholdMs > 0) r.thresholdMs = newRule.thresholdMs;
+                        if (newRule.sleepPositiveRatio > 0) r.sleepPositiveRatio = newRule.sleepPositiveRatio;
+                        if (newRule.minimumValidRatio > 0) r.minimumValidRatio = newRule.minimumValidRatio;
+                        if (newRule.recoveryMs > 0) r.recoveryMs = newRule.recoveryMs;
+                        if (newRule.headHeightRatioMax > 0) r.headHeightRatioMax = newRule.headHeightRatioMax;
+                        if (newRule.headSideRatioMin > 0) r.headSideRatioMin = newRule.headSideRatioMin;
+                        if (newRule.headArmDistanceRatioMax > 0) r.headArmDistanceRatioMax = newRule.headArmDistanceRatioMax;
+                        if (newRule.torsoAngleDegMin > 0) r.torsoAngleDegMin = newRule.torsoAngleDegMin;
+                        if (newRule.shoulderTiltDegMin > 0) r.shoulderTiltDegMin = newRule.shoulderTiltDegMin;
+                        if (newRule.motionWindowMs > 0) r.motionWindowMs = newRule.motionWindowMs;
+                        if (newRule.headMotionRatioMax > 0) r.headMotionRatioMax = newRule.headMotionRatioMax;
+                        r.enabled = true;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                {
+                    BehaviorRuleConfig r = newRule;
+                    r.id = "sleep_rule_dynamic";
+                    r.behaviorType = "sleep";
+                    r.enabled = true;
+                    ctrl->behaviorRules.push_back(r);
+                }
+                appliedControlCodes.push_back(ctrl->code);
+                anyUpdated = true;
+            }
+        }
+        if (anyUpdated)
+        {
+            msg = "algorithm config updated";
+            return true;
+        }
+        msg = "no matching control found";
+        return false;
     }
 
     Control *Worker::getControl(const std::string &code)

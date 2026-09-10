@@ -113,6 +113,7 @@ void Server::start(void *arg)
                     evhttp_set_cb(http, "/api/control", api_control, scheduler);
                     evhttp_set_cb(http, "/api/control/add", api_control_add, scheduler);
                     evhttp_set_cb(http, "/api/control/live-output", api_control_live_output, scheduler);
+                    evhttp_set_cb(http, "/api/control/update-algorithm-config", api_control_update_algorithm_config, scheduler);
                     evhttp_set_cb(http, "/api/control/cancel", api_control_cancel, scheduler);
                     evhttp_set_cb(http, "/api/alarm/bind-media", api_alarm_bind_media, scheduler);
 
@@ -139,6 +140,7 @@ void api_index(struct evhttp_request *req, void *arg)
     result_urls["/api/control"] = "get control being analyzed";
     result_urls["/api/control/add"] = "add control";
     result_urls["/api/control/live-output"] = "update live video and event output";
+    result_urls["/api/control/update-algorithm-config"] = "update algorithm and behavior rule parameters dynamically";
     result_urls["/api/control/cancel"] = "cancel control";
     result_urls["/api/alarm/bind-media"] = "bind backend alarm metadata to generated media";
     result_urls["/api/largeModelCalcu"] = "largeModelCalcu";
@@ -943,6 +945,123 @@ void api_control_add(struct evhttp_request *req, void *arg)
     else
     {
         result_msg = "invalid request parameter";
+    }
+
+    Json::Value result;
+    result["msg"] = result_msg;
+    result["code"] = result_code;
+
+    LOGI("\n \t request:%s \n \t response:%s", root.toStyledString().data(), result.toStyledString().data());
+
+    struct evbuffer *buff = evbuffer_new();
+    evbuffer_add_printf(buff, "%s", result.toStyledString().c_str());
+    evhttp_send_reply(req, HTTP_OK, nullptr, buff);
+    evbuffer_free(buff);
+}
+
+
+void api_control_update_algorithm_config(struct evhttp_request *req, void *arg)
+{
+    Scheduler *scheduler = (Scheduler *)arg;
+    std::string post_data = parse_post_str(req);
+
+    Json::CharReaderBuilder builder;
+    const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    Json::Value root;
+    JSONCPP_STRING errs;
+
+    int result_code = 0;
+    std::string result_msg = "error";
+
+    if (!scheduler)
+    {
+        result_msg = "scheduler is unavailable";
+    }
+    else if (!reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) || !errs.empty())
+    {
+        result_msg = "invalid request parameter";
+    }
+    else
+    {
+        // Parse controlCode: target control or "*" for all
+        const std::string controlCode = root.isMember("controlCode") ? root["controlCode"].asString() : "*";
+
+        // Parse detection engine thresholds
+        float scoreThreshold = root.isMember("detectionConfidence") && root["detectionConfidence"].isNumeric()
+                                   ? root["detectionConfidence"].asFloat()
+                                   : -1.0f;
+        float nmsThreshold = root.isMember("nmsThreshold") && root["nmsThreshold"].isNumeric()
+                                 ? root["nmsThreshold"].asFloat()
+                                 : -1.0f;
+
+        // Build a BehaviorRuleConfig with sleep-pose parameters
+        BehaviorRuleConfig rule;
+        rule.behaviorType = "sleep";
+        rule.enabled = true;
+
+        // Keypoint confidence
+        if (root.isMember("keypointConfidence") && root["keypointConfidence"].isNumeric())
+            rule.keypointConfidence = root["keypointConfidence"].asDouble();
+
+        // Confirm window (input in seconds, stored as milliseconds)
+        if (root.isMember("confirmWindowSec") && root["confirmWindowSec"].isNumeric())
+            rule.thresholdMs = static_cast<int64_t>(root["confirmWindowSec"].asDouble() * 1000.0);
+        else if (root.isMember("confirmWindowMs") && root["confirmWindowMs"].isNumeric())
+            rule.thresholdMs = root["confirmWindowMs"].asInt64();
+
+        // Sleep positive ratio
+        if (root.isMember("sleepPositiveRatio") && root["sleepPositiveRatio"].isNumeric())
+            rule.sleepPositiveRatio = root["sleepPositiveRatio"].asDouble();
+
+        // Head-height ratio max
+        if (root.isMember("headHeightRatioMax") && root["headHeightRatioMax"].isNumeric())
+            rule.headHeightRatioMax = root["headHeightRatioMax"].asDouble();
+
+        // Head-arm distance ratio max
+        if (root.isMember("headArmDistanceRatioMax") && root["headArmDistanceRatioMax"].isNumeric())
+            rule.headArmDistanceRatioMax = root["headArmDistanceRatioMax"].asDouble();
+
+        // Head motion ratio max
+        if (root.isMember("headMotionRatioMax") && root["headMotionRatioMax"].isNumeric())
+            rule.headMotionRatioMax = root["headMotionRatioMax"].asDouble();
+
+        // Recovery time (ms)
+        if (root.isMember("recoveryMs") && root["recoveryMs"].isNumeric())
+            rule.recoveryMs = root["recoveryMs"].asInt64();
+
+        // Torso angle minimum
+        if (root.isMember("torsoAngleDegMin") && root["torsoAngleDegMin"].isNumeric())
+            rule.torsoAngleDegMin = root["torsoAngleDegMin"].asDouble();
+
+        // Shoulder tilt minimum
+        if (root.isMember("shoulderTiltDegMin") && root["shoulderTiltDegMin"].isNumeric())
+            rule.shoulderTiltDegMin = root["shoulderTiltDegMin"].asDouble();
+
+        // Motion window (ms)
+        if (root.isMember("motionWindowMs") && root["motionWindowMs"].isNumeric())
+            rule.motionWindowMs = root["motionWindowMs"].asInt64();
+
+        LOGI("update-algorithm-config: controlCode=%s scoreThreshold=%.3f nmsThreshold=%.3f "
+             "confirmWindowMs=%lld headHeightRatioMax=%.3f sleepPositiveRatio=%.3f",
+             controlCode.c_str(), scoreThreshold, nmsThreshold,
+             (long long)rule.thresholdMs, rule.headHeightRatioMax, rule.sleepPositiveRatio);
+
+        std::vector<std::string> updatedControls;
+        std::string updateMsg;
+        bool success = scheduler->updateAlgorithmConfig(controlCode, rule, scoreThreshold, nmsThreshold, updatedControls, updateMsg);
+
+        if (success)
+        {
+            result_code = 1000;
+            result_msg = updateMsg;
+
+            LOGI("update-algorithm-config success: %s, updated %zu controls", updateMsg.c_str(), updatedControls.size());
+        }
+        else
+        {
+            result_msg = updateMsg;
+            LOGE("update-algorithm-config failed: %s", updateMsg.c_str());
+        }
     }
 
     Json::Value result;
