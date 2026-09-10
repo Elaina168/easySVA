@@ -25,6 +25,7 @@ UPDATE deployment_task SET
 -- 布控先复位为停止，避免服务未齐就拉流；登录后在页面点“启动”即可演示
 UPDATE deployment_task SET status = 'STOPPED', start_time = NULL;
 UPDATE h_device SET
+  device_name = '模拟摄像头-睡岗监控',
   is_online = '0', monitor_status = 'STOPPED',
   play_url = REPLACE(REPLACE(play_url,'127.0.0.1','host.docker.internal'),'localhost','host.docker.internal');
 
