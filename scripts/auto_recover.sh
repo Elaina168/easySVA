@@ -1,6 +1,6 @@
 #!/bin/bash
 # easySVA 自动恢复脚本：WSL 重启后自动恢复 MediaServer 代理流 + 启动所有布控
-LOG=/opt/SVA/auto_recover.log
+LOG=/opt/SVA-dev/auto_recover.log
 API="http://127.0.0.1:9114"
 ZLM="http://127.0.0.1:9992"
 SECRET="V3522025zlm0aA9ajn7UiOWi"

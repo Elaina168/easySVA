@@ -3,7 +3,7 @@
 # 自动发现/启动 GB28181 会话，转推为 live 格式供布控分析与前端平滑播放
 
 TARGET_STREAM="gb_34020000001320000002_0100000016"
-LOG="/opt/SVA/gb_bridge.log"
+LOG="/opt/SVA-dev/gb_bridge.log"
 
 get_stream_id() {
     python3 -c "

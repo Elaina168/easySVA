@@ -2,8 +2,8 @@
 # ============================================================
 # SVA 本地服务监控面板（只看本机 SVA 相关服务，不含国标设备状态）
 # 每 INTERVAL 秒刷新；Ctrl+C 退出，关闭窗口不影响后台服务。
-#   bash /opt/SVA/sva_monitor.sh
-#   ONESHOT=1 bash /opt/SVA/sva_monitor.sh   # 单帧自检
+#   bash /opt/SVA-dev/sva_monitor.sh
+#   ONESHOT=1 bash /opt/SVA-dev/sva_monitor.sh   # 单帧自检
 # 国标设备(SIP注册/心跳/信令/PTZ)请看 gb_monitor.sh
 # ============================================================
 
@@ -94,7 +94,7 @@ except Exception: print('查询失败')" 2>/dev/null)
   printf "${B}【资源】${N} 负载(1/5/15min): %s    内存: %s    CPU核数: %s\n" "$load" "$mem" "$(nproc)"
   printf "${D}──────────────────────────────────────────────────────────────────${N}\n"
   if [[ -z "$down" ]]; then printf "${G}${B}状态：● SVA 本地服务全部正常 (%d/%d)${N}\n" "$ok" "$total"
-  else printf "${R}${B}状态：✗ 异常 ->%s${N}\n${Y}  恢复命令: bash /opt/SVA/restart.sh${N}\n" "$down"; fi
+  else printf "${R}${B}状态：✗ 异常 ->%s${N}\n${Y}  恢复命令: bash /opt/SVA-dev/restart.sh${N}\n" "$down"; fi
   printf "${D}Ctrl+C 关闭（只读，不影响服务）｜国标设备请看 gb_monitor.sh${N}\n"
 }
 

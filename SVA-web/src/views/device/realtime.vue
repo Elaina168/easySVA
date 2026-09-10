@@ -35,6 +35,14 @@
 
         <el-button
           size="small"
+          :type="webcamActive ? 'danger' : 'success'"
+          :icon="webcamActive ? 'el-icon-video-pause' : 'el-icon-video-camera'"
+          style="margin-left: 12px;"
+          @click="toggleWebcamStreaming"
+        >{{ webcamActive ? '停止电脑摄像头推流' : '开启电脑摄像头推流' }}</el-button>
+
+        <el-button
+          size="small"
           :type="showPtzPanel ? 'primary' : 'default'"
           icon="el-icon-aim"
           style="margin-left: 12px;"
@@ -442,6 +450,7 @@ import { upsertScreenWallStream } from '@/api/screenWall'
 import player from '@/components/RTSPPlayer'
 import { extractPlayableUrl, isBrowserPlayableUrl, isFlvUrl } from '@/utils/mediaPlayback'
 import { ptzControl } from '@/api/ptz'
+import webcamPusher from '@/utils/webcamPusher'
 
 export default {
   name: 'DeviceRealtimeMonitor',
@@ -466,6 +475,10 @@ export default {
         ptz: { panX: 0, panY: 0, zoom: 1.0 },
         ptzLastAction: ''
       })),
+      webcamActive: false,
+      webcamMediaStream: null,
+      webcamSocket: null,
+      webcamRecorder: null,
       showPtzPanel: true,
       ptzSpeed: 32,
       lastPtzHex: '',
@@ -527,10 +540,40 @@ export default {
     this.getDeptTree()
     this.getList()
   },
+  created() {
+    this.unsubscribeWebcam = webcamPusher.subscribe(active => {
+      this.webcamActive = active
+      setTimeout(() => {
+        this.slotsData.forEach((slot, index) => {
+          if (slot.deviceId && (slot.deviceId.includes('34020000001320000003') || slot.deviceId.includes('webcam'))) {
+            if (slot.playUrl) {
+              this.initSlotPlayer(index, slot.playUrl)
+            }
+          }
+        })
+      }, 1200)
+    })
+  },
   beforeDestroy() {
     this.stopAllSlots()
+    if (this.unsubscribeWebcam) {
+      this.unsubscribeWebcam()
+    }
   },
   methods: {
+    async toggleWebcamStreaming() {
+      try {
+        const active = await webcamPusher.toggle()
+        if (active) {
+          this.$modal.msgSuccess('电脑摄像头连接成功，已开始实时推流至国标设备 2！')
+        } else {
+          this.$modal.msgInfo('已停止电脑摄像头推流，国标设备 2 已自动切回待机信号')
+        }
+      } catch (err) {
+        this.$modal.msgError('无法打开摄像头: ' + (err.message || '权限被拒绝或摄像头被占用'))
+      }
+    },
+
     getSlotVideoStyle(index) {
       const slot = this.slotsData[index]
       const ptz = (slot && slot.ptz) ? slot.ptz : { panX: 0, panY: 0, zoom: 1.0 }
