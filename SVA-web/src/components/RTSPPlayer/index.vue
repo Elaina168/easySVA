@@ -8,7 +8,7 @@
       <el-col>
         <div class="grid-content bg-purple">
           <div class="block" style="margin-top: 25px;">
-            <video ref="flvVideo" id="flv-1" height="500" muted controls loop></video>
+            <video ref="flvVideo" id="flv-1" height="500" muted controls autoplay playsinline></video>
           </div>
         </div>
       </el-col>
@@ -16,10 +16,10 @@
   </el-card>
 </template>
 
-
 <script>
 import flvjs from 'flv.js';
 import { extractPlayableUrl, isBrowserPlayableUrl, isFlvUrl } from '@/utils/mediaPlayback';
+import webcamPusher from '@/utils/webcamPusher';
 
 export default {
   name: 'player',
@@ -45,6 +45,12 @@ export default {
   data() {
     return {
       flvPlayer: null,
+      timeUpdateHandler: null,
+      reconnectTimer: null,
+      unsubscribeWebcam: null,
+      lastCurrentTime: 0,
+      stallCheckTimer: null,
+      stallCount: 0
     };
   },
 
@@ -52,6 +58,19 @@ export default {
     cardStyle() {
       return this.inline ? {} : { zIndex: 1000 };
     }
+  },
+
+  created() {
+    // 监听全局摄像头开关状态变动，若当前正打开预览，1.2s后自动平滑刷新流，无需用户手动关闭重开弹窗
+    this.unsubscribeWebcam = webcamPusher.subscribe(() => {
+      if (this.viewProof && this.rtspUrl) {
+        setTimeout(() => {
+          if (this.viewProof && this.rtspUrl) {
+            this.initFLVPlayer();
+          }
+        }, 1200);
+      }
+    });
   },
 
   mounted() {
@@ -64,34 +83,37 @@ export default {
 
   beforeDestroy() {
     this.closeFLVPlayer(true);
+    if (this.unsubscribeWebcam) {
+      this.unsubscribeWebcam();
+    }
   },
 
   methods: {
     playHttpMedia(url) {
       const videoElement = this.$refs.flvVideo;
       if (!videoElement || !url) return;
-      if (this.flvPlayer != null) this.closeFLVPlayer(true);
+      this.closeFLVPlayer(true);
       videoElement.src = url;
       videoElement.muted = false;
-      videoElement.play().catch(() => {
-      });
+      videoElement.play().catch(() => {});
     },
 
     playFlvMedia(url) {
       const videoElement = this.$refs.flvVideo;
       if (!videoElement || !url) return;
-      if (this.flvPlayer != null) this.closeFLVPlayer(true);
+      this.closeFLVPlayer(true);
 
       if (flvjs.isSupported()) {
         this.flvPlayer = flvjs.createPlayer({
-          isLive: true,
           type: 'flv',
           url: url,
+          isLive: true,
           cors: true,
           hasAudio: false
         }, {
           enableWorker: false,
           enableStashBuffer: false,
+          lazyLoad: false,
           stashInitialSize: 128,
           autoCleanupSourceBuffer: true,
           autoCleanupMaxBackwardDuration: 15,
@@ -99,7 +121,25 @@ export default {
         });
         this.flvPlayer.attachMediaElement(videoElement);
         this.flvPlayer.load();
-        this.flvPlayer.play().catch(() => {});
+        const playPromise = this.flvPlayer.play();
+        if (playPromise && playPromise.catch) {
+          playPromise.catch(() => {});
+        }
+
+        // 追帧机制与卡流自愈
+        this.timeUpdateHandler = () => {
+          if (this.flvPlayer && videoElement.buffered && videoElement.buffered.length) {
+            const end = videoElement.buffered.end(videoElement.buffered.length - 1);
+            const diff = end - videoElement.currentTime;
+            if (diff > 1.2) {
+              videoElement.currentTime = end - 0.1;
+            }
+          }
+        };
+        videoElement.addEventListener('timeupdate', this.timeUpdateHandler);
+
+        // 监测码流突变导致的画面冻结，若持续停滞超 2.5 秒则自愈重连
+        this.startStallDetection(videoElement);
 
         this.flvPlayer.on(flvjs.Events.ERROR, (errType, errDetail) => {
           console.warn('[RTSPPlayer] FLV error:', errType, errDetail);
@@ -113,7 +153,32 @@ export default {
       }
     },
 
+    startStallDetection(videoElement) {
+      if (this.stallCheckTimer) clearInterval(this.stallCheckTimer);
+      this.stallCount = 0;
+      this.lastCurrentTime = videoElement ? videoElement.currentTime : 0;
+      this.stallCheckTimer = setInterval(() => {
+        if (!this.viewProof || !this.flvPlayer || !videoElement) {
+          if (this.stallCheckTimer) clearInterval(this.stallCheckTimer);
+          return;
+        }
+        if (Math.abs(videoElement.currentTime - this.lastCurrentTime) < 0.05 && !videoElement.paused) {
+          this.stallCount += 1;
+          if (this.stallCount >= 3) {
+            this.stallCount = 0;
+            this.initFLVPlayer();
+          }
+        } else {
+          this.stallCount = 0;
+          this.lastCurrentTime = videoElement.currentTime;
+        }
+      }, 1000);
+    },
+
     initFLVPlayer() {
+      if (!this.viewProof || !this.rtspUrl) {
+        return;
+      }
       const videoElement = this.$refs.flvVideo;
       const url = extractPlayableUrl(this.rtspUrl);
       if (!videoElement || !isBrowserPlayableUrl(url)) {
@@ -128,64 +193,66 @@ export default {
       }
     },
 
-
     closeFLVPlayer(realClose) {
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      if (this.stallCheckTimer) {
+        clearInterval(this.stallCheckTimer);
+        this.stallCheckTimer = null;
+      }
       const videoElement = this.$refs.flvVideo;
+      if (videoElement && this.timeUpdateHandler) {
+        videoElement.removeEventListener('timeupdate', this.timeUpdateHandler);
+        this.timeUpdateHandler = null;
+      }
+
       if (this.flvPlayer != null) {
-        if (realClose == true) {
-          console.log("正在销毁播放器……");
+        try {
+          this.flvPlayer.pause();
           this.flvPlayer.unload();
           this.flvPlayer.detachMediaElement();
           this.flvPlayer.destroy();
-          this.flvPlayer = null;
-          console.log("销毁完毕……");
-        } else {
-          this.flvPlayer.pause();
-          this.flvPlayer.muted = true; // 静音
+        } catch (e) {
+          // ignore
         }
+        this.flvPlayer = null;
       }
 
       if (videoElement) {
-        if (realClose == true) {
-          videoElement.pause();
-          videoElement.removeAttribute('src');
-          videoElement.load();
-        } else {
-          videoElement.pause();
-        }
+        videoElement.pause();
+        videoElement.removeAttribute('src');
+        videoElement.load();
       }
     },
 
     closeProof() {
-      this.closeFLVPlayer(false);
+      this.closeFLVPlayer(true);
       this.$emit('closeProof');
-    },
-
-  },
-  watch: {
-    rtspUrl(newVal, oldVal) {
-      this.$nextTick(() => {
-        this.initFLVPlayer();
-      });
-    },
-
-    // 播放器显示时，如果本身有 flv 则直接继续播放
-    viewProof(newVal, oldVal) {
-      if (newVal == true) {
-        if (this.flvPlayer != null) {
-          this.flvPlayer.play();
-          this.flvPlayer.muted = false;
-          return;
-        }
-        if (this.rtspUrl) {
-          this.$nextTick(() => {
-            this.initFLVPlayer();
-          });
-        }
-      }
     }
   },
-}
+
+  watch: {
+    rtspUrl(newVal) {
+      if (this.viewProof && newVal) {
+        this.$nextTick(() => {
+          this.initFLVPlayer();
+        });
+      }
+    },
+
+    viewProof(newVal) {
+      if (newVal === true) {
+        this.$nextTick(() => {
+          this.initFLVPlayer();
+        });
+      } else {
+        this.closeFLVPlayer(true);
+      }
+    }
+  }
+};
 </script>
 
 <style lang="scss" scoped>

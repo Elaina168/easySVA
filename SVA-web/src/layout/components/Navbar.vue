@@ -7,29 +7,24 @@
     <top-nav id="topmenu-container" class="topmenu-container" v-if="topNav"/>
 
     <div class="right-menu">
-      <!-- <template v-if="device!=='mobile'">
-        <search id="header-search" class="right-menu-item" />
-
-        <el-tooltip content="源码地址" effect="dark" placement="bottom">
-          <ruo-yi-git id="ruoyi-git" class="right-menu-item hover-effect" />
-        </el-tooltip>
-
-        <el-tooltip content="文档地址" effect="dark" placement="bottom">
-          <ruo-yi-doc id="ruoyi-doc" class="right-menu-item hover-effect" />
-        </el-tooltip>
-
-        <screenfull id="screenfull" class="right-menu-item hover-effect" />
-
-        <el-tooltip content="布局大小" effect="dark" placement="bottom">
-          <size-select id="size-select" class="right-menu-item hover-effect" />
-        </el-tooltip>
-
-      </template> -->
-      <template>
-        <el-button type="text" icon="el-icon-data-line" @click="jump2DP"
-                   class="right-menu-item hover-effect">大屏
+      <!-- 全局电脑摄像头推流常驻控制 -->
+      <el-tooltip :content="isWebcamActive ? '电脑摄像头推流中（点击可停止）' : '开启工位电脑摄像头推流（全系统各模块共享）'" placement="bottom">
+        <el-button
+          size="mini"
+          round
+          :type="isWebcamActive ? 'danger' : 'success'"
+          :icon="isWebcamActive ? 'el-icon-video-pause' : 'el-icon-video-camera'"
+          style="margin-right: 14px;"
+          @click="toggleGlobalWebcam"
+        >
+          {{ isWebcamActive ? '停止电脑摄像头' : '开启电脑摄像头' }}
         </el-button>
-      </template>
+      </el-tooltip>
+
+      <div class="right-menu-item hover-effect dp-btn" @click="jump2DP">
+        <i class="el-icon-data-line"></i>
+        <span>大屏</span>
+      </div>
 
       <el-dropdown class="avatar-container right-menu-item hover-effect" trigger="click">
         <div class="avatar-wrapper">
@@ -40,9 +35,6 @@
           <router-link to="/user/profile">
             <el-dropdown-item>个人中心</el-dropdown-item>
           </router-link>
-          <!-- <el-dropdown-item @click.native="setting = true">
-            <span>布局设置</span>
-          </el-dropdown-item> -->
           <el-dropdown-item divided @click.native="logout">
             <span>退出登录</span>
           </el-dropdown-item>
@@ -62,6 +54,7 @@ import SizeSelect from '@/components/SizeSelect'
 import Search from '@/components/HeaderSearch'
 import RuoYiGit from '@/components/RuoYi/Git'
 import RuoYiDoc from '@/components/RuoYi/Doc'
+import webcamPusher from '@/utils/webcamPusher'
 
 export default {
   components: {
@@ -73,6 +66,22 @@ export default {
     Search,
     RuoYiGit,
     RuoYiDoc
+  },
+  data() {
+    return {
+      isWebcamActive: false,
+      unsubscribeWebcam: null
+    }
+  },
+  created() {
+    this.unsubscribeWebcam = webcamPusher.subscribe(active => {
+      this.isWebcamActive = active
+    })
+  },
+  beforeDestroy() {
+    if (this.unsubscribeWebcam) {
+      this.unsubscribeWebcam()
+    }
   },
 
   computed: {
@@ -99,6 +108,18 @@ export default {
     }
   },
   methods: {
+    async toggleGlobalWebcam() {
+      try {
+        const active = await webcamPusher.toggle()
+        if (active) {
+          this.$message.success('已开启工位电脑摄像头推流！可在【实时监控】、【设备管理视频预览】全系统使用。')
+        } else {
+          this.$message.info('已停止电脑摄像头推流。')
+        }
+      } catch (err) {
+        this.$message.error('开启电脑摄像头失败: ' + (err.message || '请检查浏览器权限'))
+      }
+    },
     jump2End() {
       const currentProtocol = window.location.protocol;
       const currentHost = window.location.hostname;
@@ -128,14 +149,6 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.tiny-modal__wrapper.is__visible:not(.type__message) .tiny-modal__box:not(.is__drag) {
-  left: 817px;
-  position: fixed;
-  top: 400px;
-  -webkit-transition: top 0s ease-in, opacity .4s ease-in;
-  transition: top 0s ease-in, opacity .4s ease-in;
-}
-
 .app-breadcrumb.el-breadcrumb {
   cursor: text;
   font-size: 18px;
@@ -163,13 +176,11 @@ export default {
 
   .breadcrumb-container {
     float: left;
-
   }
 
   .topmenu-container {
     position: absolute;
     left: 50px;
-
   }
 
   .errLog-container {
@@ -181,49 +192,58 @@ export default {
     float: right;
     height: 100%;
     line-height: 50px;
+    display: flex;
+    align-items: center;
+    padding-right: 20px;
 
     &:focus {
       outline: none;
     }
 
-    .right-menu-item {
-      display: inline-block;
-      padding: 0 8px;
-      height: 100%;
-      font-size: 18px;
+    .dp-btn {
+      display: inline-flex;
+      align-items: center;
+      height: 30px;
+      line-height: 30px;
+      padding: 0 10px;
+      margin-right: 14px;
+      font-size: 14px;
       color: #5a5e66;
-      vertical-align: text-bottom;
+      border-radius: 4px;
+      cursor: pointer;
+      user-select: none;
 
-      &.hover-effect {
-        cursor: pointer;
-        transition: background .3s;
+      i {
+        font-size: 16px;
+        margin-right: 4px;
+      }
 
-        &:hover {
-          background: rgba(0, 0, 0, .025)
-        }
+      &:hover {
+        color: #1890ff;
+        background: rgba(0, 0, 0, 0.035);
       }
     }
 
     .avatar-container {
-      margin-right: 30px;
+      display: inline-flex;
+      align-items: center;
 
       .avatar-wrapper {
-        margin-top: 5px;
+        display: inline-flex;
+        align-items: center;
         position: relative;
+        cursor: pointer;
 
         .user-avatar {
-          cursor: pointer;
-          width: 40px;
-          height: 40px;
-          border-radius: 10px;
+          width: 34px;
+          height: 34px;
+          border-radius: 8px;
         }
 
         .el-icon-caret-bottom {
-          cursor: pointer;
-          position: absolute;
-          right: -20px;
-          top: 25px;
+          margin-left: 6px;
           font-size: 12px;
+          color: #909399;
         }
       }
     }
