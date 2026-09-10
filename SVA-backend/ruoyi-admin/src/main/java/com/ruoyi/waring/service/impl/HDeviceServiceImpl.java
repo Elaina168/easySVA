@@ -974,7 +974,15 @@ public class HDeviceServiceImpl implements HDeviceService {
                 GbDeviceDTO dto = new GbDeviceDTO();
                 dto.setDeviceId(deviceId);
                 String ua = dev.path("user_agent").asText("");
-                dto.setName(StringUtils.isNotBlank(ua) ? ua : deviceId);
+                String devName = ua;
+                if ("34020000001320000001".equals(deviceId)) {
+                    devName = "西门高精度国标球机(本地视频源)";
+                } else if ("34020000001320000003".equals(deviceId)) {
+                    devName = "工位实景国标摄像头(电脑摄像头)";
+                } else if (StringUtils.isBlank(devName) || devName.contains("simulator")) {
+                    devName = "GB28181国标设备 (" + deviceId + ")";
+                }
+                dto.setName(devName);
                 dto.setPlatformId(gbPlatformId);
                 dto.setStatus(dev.path("online").asBoolean(false) ? "online" : "offline");
                 dto.setOnline(dev.path("online").asBoolean(false));
@@ -1044,6 +1052,14 @@ public class HDeviceServiceImpl implements HDeviceService {
             throw new ServiceException("设备标识 (apeId) 不能为空");
         }
         HDevice device = selectDeviceByApeId(apeId);
+        if (device == null) {
+            HDevice query = new HDevice();
+            query.setGb_device_id(apeId);
+            List<HDevice> list = hDeviceMapper.selectDeviceList(query);
+            if (list != null && !list.isEmpty()) {
+                device = list.get(0);
+            }
+        }
         if (device == null) {
             throw new ServiceException("未找到该设备: " + apeId);
         }
