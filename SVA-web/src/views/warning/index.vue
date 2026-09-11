@@ -15,6 +15,12 @@
         </el-select>
       </el-form-item>
 
+      <el-form-item label="机器告警类型" prop="alarm_type">
+        <el-select v-model="querySpecificParams.alarm_type" placeholder="机器告警类型" clearable style="width: 180px">
+          <el-option label="睡岗告警" value="SVA_SLEEP"/>
+        </el-select>
+      </el-form-item>
+
       <el-form-item label="处理状态" prop="is_handle">
         <el-select v-model="querySpecificParams.is_handle" placeholder="处理状态" clearable style="width: 200px">
           <el-option v-for="op in isHandleOptions" :key="op.value" :label="op.label" :value="op.value"/>
@@ -245,6 +251,7 @@ export default {
       querySpecificParams: {
         device_name: undefined,
         org_name: undefined,
+        alarm_type: undefined,
         alarm_type_name: undefined,
         alarm_level_name: undefined,
         team: undefined,
@@ -313,6 +320,7 @@ export default {
     this.querySpecificParams = {
       device_name: undefined,
       org_name: undefined,
+      alarm_type: undefined,
       alarm_type_name: undefined,
       alarm_level_name: undefined,
       is_handle: undefined,
@@ -348,9 +356,11 @@ export default {
       const alarmLevelName = this.$route.query.alarm_level_name;
       const withQue = this.$route.query.withQue;
       const time = this.$route.query.time;
+      const alarmType = this.$route.query.alarm_type;
       const type = this.$route.query.alarm_type_name;
       const wid = this.$route.query.wid;
       if (alarmLevelName) this.querySpecificParams.alarm_level_name = alarmLevelName;
+      if (alarmType) this.querySpecificParams.alarm_type = alarmType;
       if (type) this.querySpecificParams.alarm_type_name = type;
       if (wid) this.querySpecificParams.w_id = wid;
       if (withQue) {
@@ -677,6 +687,7 @@ export default {
       if (behaviorType === 'dwell') return '停留';
       if (behaviorType === 'low_speed') return '低速';
       if (behaviorType === 'loitering') return '徘徊';
+      if (behaviorType === 'sleep') return '睡岗';
       if (behaviorType === 'absence') return '缺席';
       if (behaviorType === 'count_threshold') return '数量阈值';
       if (behaviorType === 'occupancy') return '占用';

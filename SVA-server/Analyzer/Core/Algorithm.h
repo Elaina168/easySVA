@@ -1,4 +1,4 @@
-﻿#ifndef ANALYZER_ALGORITHM_H
+#ifndef ANALYZER_ALGORITHM_H
 #define ANALYZER_ALGORITHM_H
 
 #include <string>
@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <opencv2/opencv.hpp> //opencv header file
 #include "TrackMetadata.h"
+#include "PoseTypes.h"
 
 namespace SVAAnalyzer
 {
@@ -52,6 +53,9 @@ namespace SVAAnalyzer
         std::string class_name;
         std::string source_algorithm;
         bool happen = false;
+        bool hasPose = false;
+        PoseKeypoints keypoints{};
+        SleepPoseAnalysis sleepPose{};
 
         // Temporal tracking (from TemporalProcessor)
         int trackId = -1;
@@ -96,6 +100,10 @@ namespace SVAAnalyzer
 
     public:
         virtual bool objectDetect(cv::Mat &image, std::vector<DetectObject> &detects) = 0;
+        virtual void setDetectionConfidence(float val) {}
+        virtual float getDetectionConfidence() const { return 0.35f; }
+        virtual void setNmsThreshold(float val) {}
+        virtual float getNmsThreshold() const { return 0.45f; }
         bool createState();
 
     protected:

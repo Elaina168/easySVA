@@ -99,3 +99,10 @@ export function previewDeviceMonitor(apeId) {
     method: 'get'
   })
 }
+
+export function syncGbDevices() {
+  return request({
+    url: '/waring/device/gb28181/sync',
+    method: 'post'
+  })
+}

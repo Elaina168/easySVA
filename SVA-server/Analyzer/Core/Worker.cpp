@@ -1,4 +1,4 @@
-﻿#include "Worker.h"
+#include "Worker.h"
 #include "Algorithm.h"
 #include "Analyzer.h"
 #include "AvPullStream.h"
@@ -13,8 +13,10 @@
 #include "Utils/Log.h"
 #include <chrono>
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <filesystem>
+#include <utility>
 extern "C"
 {
 #include <libavutil/imgutils.h>
@@ -26,6 +28,48 @@ namespace SVAAnalyzer
 {
     namespace
     {
+        constexpr float POSE_OVERLAY_CONFIDENCE = 0.35f;
+        constexpr std::array<std::pair<size_t, size_t>, 18> COCO_POSE_EDGES{{
+            {0, 1}, {0, 2}, {1, 3}, {2, 4}, {3, 5}, {4, 6},
+            {5, 6}, {5, 7}, {7, 9}, {6, 8}, {8, 10}, {5, 11},
+            {6, 12}, {11, 12}, {11, 13}, {13, 15}, {12, 14}, {14, 16},
+        }};
+
+        void drawPoseOverlay(cv::Mat &image, const DetectObject &detect)
+        {
+            if (!detect.hasPose)
+            {
+                return;
+            }
+            for (const auto &edge : COCO_POSE_EDGES)
+            {
+                const PoseKeypoint &start = detect.keypoints[edge.first];
+                const PoseKeypoint &end = detect.keypoints[edge.second];
+                if (start.confidence >= POSE_OVERLAY_CONFIDENCE &&
+                    end.confidence >= POSE_OVERLAY_CONFIDENCE)
+                {
+                    cv::line(image,
+                             cv::Point(cvRound(start.x), cvRound(start.y)),
+                             cv::Point(cvRound(end.x), cvRound(end.y)),
+                             cv::Scalar(0, 255, 0),
+                             2,
+                             cv::LINE_AA);
+                }
+            }
+            for (const PoseKeypoint &keypoint : detect.keypoints)
+            {
+                if (keypoint.confidence >= POSE_OVERLAY_CONFIDENCE)
+                {
+                    cv::circle(image,
+                               cv::Point(cvRound(keypoint.x), cvRound(keypoint.y)),
+                               3,
+                               cv::Scalar(0, 0, 255),
+                               -1,
+                               cv::LINE_AA);
+                }
+            }
+        }
+
         bool saveDetectEventSnapshot(Config *config,
                                      const std::string &controlCode,
                                      const cv::Mat &image,
@@ -287,6 +331,142 @@ namespace SVAAnalyzer
         }
         deleteControlRuntime(runtime);
         return true;
+    }
+
+    bool Worker::updateLiveOutput(const std::string &code,
+                                  bool videoEnabled,
+                                  bool liveEventEnabled,
+                                  float wsEventFps,
+                                  const std::string &pushStreamUrl,
+                                  std::string &msg)
+    {
+        std::lock_guard<std::mutex> lock(mControlRuntimesMtx);
+        auto it = mControlRuntimes.find(code);
+        if (it == mControlRuntimes.end() || !it->second || !it->second->control)
+        {
+            msg = "the control does not exist";
+            return false;
+        }
+
+        WorkerControlRuntime *runtime = it->second;
+        Control *control = runtime->control;
+
+        if (videoEnabled && !runtime->pushStream)
+        {
+            if (pushStreamUrl.empty())
+            {
+                msg = "pushStreamUrl is required when video output is enabled";
+                return false;
+            }
+
+            const bool previousPushStream = control->pushStream;
+            const std::string previousPushStreamUrl = control->pushStreamUrl;
+            control->pushStream = true;
+            control->pushStreamUrl = pushStreamUrl;
+
+            AvPushStream *newPushStream = new AvPushStream(this, control);
+            if (!newPushStream->connect())
+            {
+                delete newPushStream;
+                control->pushStream = previousPushStream;
+                control->pushStreamUrl = previousPushStreamUrl;
+                msg = "push stream connect error";
+                return false;
+            }
+
+            runtime->pushStream = newPushStream;
+            runtime->encodeThread = new std::thread(AvPushStream::encodeVideoThread, runtime->pushStream);
+        }
+        else if (!videoEnabled && runtime->pushStream)
+        {
+            control->pushStream = false;
+            runtime->pushStream->notifyStop();
+            if (runtime->encodeThread)
+            {
+                if (runtime->encodeThread->joinable())
+                {
+                    runtime->encodeThread->join();
+                }
+                delete runtime->encodeThread;
+                runtime->encodeThread = nullptr;
+            }
+            delete runtime->pushStream;
+            runtime->pushStream = nullptr;
+        }
+
+        control->pushStream = videoEnabled;
+        if (videoEnabled && !pushStreamUrl.empty())
+        {
+            control->pushStreamUrl = pushStreamUrl;
+        }
+        control->serverOverlayEnabled = videoEnabled;
+        control->wsOverlayEnabled = liveEventEnabled;
+        control->wsEventFps = liveEventEnabled ? wsEventFps : 0.0f;
+        control->renderMode = videoEnabled ? "server_overlay" : (liveEventEnabled ? "ws_overlay" : "detect_only");
+
+        msg = "live output updated";
+        return true;
+    }
+
+    bool Worker::updateAlgorithmConfig(const std::string &code,
+                                      const BehaviorRuleConfig &newRule,
+                                      float scoreThreshold,
+                                      float nmsThreshold,
+                                      std::vector<std::string> &appliedControlCodes,
+                                      std::string &msg)
+    {
+        std::lock_guard<std::mutex> lock(mControlRuntimesMtx);
+        bool anyUpdated = false;
+        for (auto &pair : mControlRuntimes)
+        {
+            if (code.empty() || code == "*" || pair.first == code)
+            {
+                if (!pair.second || !pair.second->control)
+                {
+                    continue;
+                }
+                Control *ctrl = pair.second->control;
+                bool found = false;
+                for (auto &r : ctrl->behaviorRules)
+                {
+                    if (r.behaviorType == "sleep")
+                    {
+                        if (newRule.keypointConfidence > 0) r.keypointConfidence = newRule.keypointConfidence;
+                        if (newRule.thresholdMs > 0) r.thresholdMs = newRule.thresholdMs;
+                        if (newRule.sleepPositiveRatio > 0) r.sleepPositiveRatio = newRule.sleepPositiveRatio;
+                        if (newRule.minimumValidRatio > 0) r.minimumValidRatio = newRule.minimumValidRatio;
+                        if (newRule.recoveryMs > 0) r.recoveryMs = newRule.recoveryMs;
+                        if (newRule.headHeightRatioMax > 0) r.headHeightRatioMax = newRule.headHeightRatioMax;
+                        if (newRule.headSideRatioMin > 0) r.headSideRatioMin = newRule.headSideRatioMin;
+                        if (newRule.headArmDistanceRatioMax > 0) r.headArmDistanceRatioMax = newRule.headArmDistanceRatioMax;
+                        if (newRule.torsoAngleDegMin > 0) r.torsoAngleDegMin = newRule.torsoAngleDegMin;
+                        if (newRule.shoulderTiltDegMin > 0) r.shoulderTiltDegMin = newRule.shoulderTiltDegMin;
+                        if (newRule.motionWindowMs > 0) r.motionWindowMs = newRule.motionWindowMs;
+                        if (newRule.headMotionRatioMax > 0) r.headMotionRatioMax = newRule.headMotionRatioMax;
+                        r.enabled = true;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                {
+                    BehaviorRuleConfig r = newRule;
+                    r.id = "sleep_rule_dynamic";
+                    r.behaviorType = "sleep";
+                    r.enabled = true;
+                    ctrl->behaviorRules.push_back(r);
+                }
+                appliedControlCodes.push_back(ctrl->code);
+                anyUpdated = true;
+            }
+        }
+        if (anyUpdated)
+        {
+            msg = "algorithm config updated";
+            return true;
+        }
+        msg = "no matching control found";
+        return false;
     }
 
     Control *Worker::getControl(const std::string &code)
@@ -623,10 +803,21 @@ namespace SVAAnalyzer
                         happenScore = 0.0;
 
                         bool shouldInfer = true;
-                        if (control.checkFps > 0.0f)
+                        if (control.detectFps <= -1.5f)
                         {
-                            const int64_t nowMs = getCurTimestamp();
-                            const double intervalMs = 1000.0 / static_cast<double>(control.checkFps);
+                            shouldInfer = false;
+                        }
+                        else if (control.detectFps <= -0.5f)
+                        {
+                            if (!isKeyframe)
+                            {
+                                shouldInfer = false;
+                            }
+                        }
+                        else if (control.detectFps > 0.0f)
+                        {
+                            const int64_t nowMs = getCurTime();
+                            const double intervalMs = 1000.0 / static_cast<double>(control.detectFps);
                             if (runtime->lastInferTimestampMs > 0 &&
                                 static_cast<double>(nowMs - runtime->lastInferTimestampMs) < intervalMs)
                             {
@@ -910,6 +1101,9 @@ namespace SVAAnalyzer
                                 obj.className = src.class_name;
                                 obj.algorithmCode = src.source_algorithm;
                                 obj.happen = src.happen;
+                                obj.hasPose = src.hasPose;
+                                obj.keypoints = src.keypoints;
+                                obj.sleepPose = src.sleepPose;
                                 obj.trackId = src.trackId;
                                 obj.firstSeenTimestampMs = src.firstSeenTimestampMs;
                                 obj.lastSeenTimestampMs = src.lastSeenTimestampMs;
@@ -1001,8 +1195,13 @@ namespace SVAAnalyzer
                                     char classScoreBuf[16];
                                     std::snprintf(classScoreBuf, sizeof(classScoreBuf), "%.2f", det.class_score);
                                     std::string title = det.class_name + " " + classScoreBuf;
+                                    if (det.sleepPose.evaluated)
+                                    {
+                                        title += " " + det.sleepPose.state;
+                                    }
 
                                     cv::rectangle(image, cv::Rect(x1, y1, x2 - x1, y2 - y1), boxColor, boxThickness, cv::LINE_AA);
+                                    drawPoseOverlay(image, det);
 
                                     cv::Size text_size = cv::getTextSize(title, cv::FONT_HERSHEY_SIMPLEX, font_scale, font_thickness, nullptr);
                                     int text_bg_height = text_size.height + text_padding * 2;

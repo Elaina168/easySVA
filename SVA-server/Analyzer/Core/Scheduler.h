@@ -1,4 +1,4 @@
-﻿#ifndef ANALYZER_SCHEDULER_H
+#ifndef ANALYZER_SCHEDULER_H
 #define ANALYZER_SCHEDULER_H
 #include <map>
 #include <mutex>
@@ -13,6 +13,8 @@
 #include <opencv2/opencv.hpp>
 #include "TrackMetadata.h"
 #include "TemporalContext.h"
+#include "PoseTypes.h"
+#include "SleepPoseEvaluator.h"
 
 namespace SVAAnalyzer
 {
@@ -20,6 +22,7 @@ namespace SVAAnalyzer
 	class Worker;
 	class Algorithm;
 	struct Control;
+	struct BehaviorRuleConfig;
 	struct AlarmImage;
 	struct Alarm;
 	
@@ -44,6 +47,9 @@ namespace SVAAnalyzer
 		std::string className;
 		std::string algorithmCode;
 		bool happen = false;
+		bool hasPose = false;
+		PoseKeypoints keypoints{};
+		SleepPoseAnalysis sleepPose{};
 		
 		// Temporal tracking fields (populated by TemporalProcessor)
 		int trackId = -1;
@@ -290,6 +296,7 @@ namespace SVAAnalyzer
 		 */
 		Algorithm *on_yolo11n_80 = nullptr;
 		Algorithm *on_yolo26n_80 = nullptr;
+		Algorithm *on_yolo11n_pose = nullptr;
 		void loop();
 
 		void setState(bool state);
@@ -309,6 +316,12 @@ namespace SVAAnalyzer
 		 * @brief Update temporal tracking state for a stream.
 		 * Called from Worker after inference to enrich detections with track IDs and trails.
 		 */
+		bool updateAlgorithmConfig(const std::string &controlCode,
+								  const BehaviorRuleConfig &rule,
+								  float scoreThreshold,
+								  float nmsThreshold,
+								  std::vector<std::string> &updatedControls,
+								  std::string &msg);
 		void updateTemporalTracks(const Control &control,
 								  const std::string &streamCode,
 								  std::vector<DetectObject *> detects,
@@ -372,6 +385,13 @@ namespace SVAAnalyzer
 		int apiControls(std::vector<Control *> &controls);
 		Control *apiControl(std::string &code);
 		void apiControlAdd(Control *control, int &result_code, std::string &result_msg);
+		void apiControlLiveOutput(const std::string &code,
+							  bool videoEnabled,
+							  bool liveEventEnabled,
+							  float wsEventFps,
+							  const std::string &pushStreamUrl,
+							  int &result_code,
+							  std::string &result_msg);
 		void apiControlCancel(Control *control, int &result_code, std::string &result_msg);
 		// ApiServer 对应的函数 end
 
@@ -441,6 +461,7 @@ namespace SVAAnalyzer
 		// Temporal context per stream (teaching: worker architecture owns one context per stream)
 		std::mutex mStreamTemporalMtx;
 		std::unordered_map<std::string, StreamTemporalContext> mStreamTemporalContextMap;
+		std::unordered_map<std::string, SleepPoseStreamContext> mSleepPoseContextMap;
 		
 		// Behavior analysis runtime state
 		std::mutex mAggregateBehaviorStateMtx;

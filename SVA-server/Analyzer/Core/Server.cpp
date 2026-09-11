@@ -1,4 +1,4 @@
-﻿#include "Server.h"
+#include "Server.h"
 
 #ifdef WIN32
 #pragma comment(lib, "ws2_32.lib")
@@ -112,6 +112,8 @@ void Server::start(void *arg)
                     evhttp_set_cb(http, "/api/controls", api_controls, scheduler);
                     evhttp_set_cb(http, "/api/control", api_control, scheduler);
                     evhttp_set_cb(http, "/api/control/add", api_control_add, scheduler);
+                    evhttp_set_cb(http, "/api/control/live-output", api_control_live_output, scheduler);
+                    evhttp_set_cb(http, "/api/control/update-algorithm-config", api_control_update_algorithm_config, scheduler);
                     evhttp_set_cb(http, "/api/control/cancel", api_control_cancel, scheduler);
                     evhttp_set_cb(http, "/api/alarm/bind-media", api_alarm_bind_media, scheduler);
 
@@ -137,6 +139,8 @@ void api_index(struct evhttp_request *req, void *arg)
     result_urls["/api/controls"] = "get all control being analyzed";
     result_urls["/api/control"] = "get control being analyzed";
     result_urls["/api/control/add"] = "add control";
+    result_urls["/api/control/live-output"] = "update live video and event output";
+    result_urls["/api/control/update-algorithm-config"] = "update algorithm and behavior rule parameters dynamically";
     result_urls["/api/control/cancel"] = "cancel control";
     result_urls["/api/alarm/bind-media"] = "bind backend alarm metadata to generated media";
     result_urls["/api/largeModelCalcu"] = "largeModelCalcu";
@@ -235,8 +239,7 @@ void api_controls(struct evhttp_request *req, void *arg)
 {
 
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -249,7 +252,7 @@ void api_controls(struct evhttp_request *req, void *arg)
     std::string result_msg = "error";
     Json::Value result;
 
-    if (reader->parse(buf, buf + std::strlen(buf), &root, &errs) && errs.empty())
+    if (reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) && errs.empty())
     {
 
         std::vector<Control *> controls;
@@ -265,6 +268,7 @@ void api_controls(struct evhttp_request *req, void *arg)
 
                 result_data_item["code"] = controls[i]->code.data();
                 result_data_item["streamUrl"] = controls[i]->streamUrl.data();
+                result_data_item["streamProtocol"] = controls[i]->streamProtocol.data();
 
                 result_data_item["pushStream"] = controls[i]->pushStream;
                 result_data_item["pushStreamUrl"] = controls[i]->pushStreamUrl.data();
@@ -323,8 +327,7 @@ void api_control(struct evhttp_request *req, void *arg)
 {
 
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -335,13 +338,21 @@ void api_control(struct evhttp_request *req, void *arg)
     int result_code = 0;
     std::string result_msg = "error";
 
-    if (reader->parse(buf, buf + std::strlen(buf), &root, &errs) && errs.empty())
+    if (reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) && errs.empty())
     {
 
         Control *control = NULL;
+        std::string code;
         if (root["code"].isString())
         {
-            std::string code = root["code"].asCString();
+            code = root["code"].asString();
+        }
+        else if (root["controlCode"].isString())
+        {
+            code = root["controlCode"].asString();
+        }
+        if (!code.empty())
+        {
             control = scheduler->apiControl(code);
         }
 
@@ -380,8 +391,7 @@ void api_control_add(struct evhttp_request *req, void *arg)
 {
 
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -391,7 +401,7 @@ void api_control_add(struct evhttp_request *req, void *arg)
     int result_code = 0;
     std::string result_msg = "error";
 
-    if (reader->parse(buf, buf + std::strlen(buf), &root, &errs) && errs.empty())
+    if (reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) && errs.empty())
     {
         auto tryParseFloat = [](const std::string &text, float &out) -> bool {
             if (text.empty())
@@ -449,14 +459,48 @@ void api_control_add(struct evhttp_request *req, void *arg)
 
         Control control;
 
-        control.code = root["code"].asCString();
+        if (root["code"].isString())
+        {
+            control.code = root["code"].asString();
+        }
+        else if (root["controlCode"].isString())
+        {
+            control.code = root["controlCode"].asString();
+        }
 
-        control.streamCode = root["streamCode"].asString();
-        control.streamApp = root["streamApp"].asString();
-        control.streamName = root["streamName"].asString();
-        control.streamUrl = root["streamUrl"].asString();
-        control.pushStream = root["pushStream"].asBool();
-        control.pushStreamUrl = root["pushStreamUrl"].asString();
+        if (root["streamCode"].isString())
+        {
+            control.streamCode = root["streamCode"].asString();
+        }
+        if (root["streamApp"].isString())
+        {
+            control.streamApp = root["streamApp"].asString();
+        }
+        if (root["streamName"].isString())
+        {
+            control.streamName = root["streamName"].asString();
+        }
+        if (root["streamUrl"].isString())
+        {
+            control.streamUrl = root["streamUrl"].asString();
+        }
+        if (root.isMember("streamProtocol") && root["streamProtocol"].isString())
+        {
+            control.streamProtocol = root["streamProtocol"].asString();
+        }
+        if (control.streamProtocol.empty())
+        {
+            control.streamProtocol = (control.streamUrl.rfind("gb28181://", 0) == 0 || control.streamUrl.rfind("gb://", 0) == 0)
+                ? "gb28181" : "rtsp";
+        }
+        if (root["pushStream"].isBool())
+        {
+            control.pushStream = root["pushStream"].asBool();
+        }
+        if (root["pushStreamUrl"].isString())
+        {
+            control.pushStreamUrl = root["pushStreamUrl"].asString();
+        }
         if (root["renderMode"].isString())
         {
             control.renderMode = root["renderMode"].asString();
@@ -683,12 +727,24 @@ void api_control_add(struct evhttp_request *req, void *arg)
             }
         }
 
-        control.algorithmCode = root["algorithmCode"].asString();
-        control.api_url = root["api_url"].asString();
-        control.object_str = root["object_str"].asString();
-        control.objects_v1 = split(control.object_str, ",");
-        control.objects_v1_len = control.objects_v1.size();
-        control.objectCode = root["objectCode"].asString();
+        if (root["algorithmCode"].isString())
+        {
+            control.algorithmCode = root["algorithmCode"].asString();
+        }
+        if (root["api_url"].isString())
+        {
+            control.api_url = root["api_url"].asString();
+        }
+        if (root["object_str"].isString())
+        {
+            control.object_str = root["object_str"].asString();
+            control.objects_v1 = split(control.object_str, ",");
+            control.objects_v1_len = control.objects_v1.size();
+        }
+        if (root["objectCode"].isString())
+        {
+            control.objectCode = root["objectCode"].asString();
+        }
         control.objectCodes = parseStringList(root["objectCodes"]);
         if (control.objectCodes.empty() && root["objectCode"].isString())
         {
@@ -696,7 +752,10 @@ void api_control_add(struct evhttp_request *req, void *arg)
         }
         control.objectCodes = Control::normalizeObjectClassValues(control.objectCodes);
         control.objectCode = control.getPrimaryObjectCode();
-        control.recognitionRegion = root["recognitionRegion"].asString();
+        if (root["recognitionRegion"].isString())
+        {
+            control.recognitionRegion = root["recognitionRegion"].asString();
+        }
 
         if (root["algorithmTasks"].isArray())
         {
@@ -900,12 +959,197 @@ void api_control_add(struct evhttp_request *req, void *arg)
     evbuffer_free(buff);
 }
 
+
+void api_control_update_algorithm_config(struct evhttp_request *req, void *arg)
+{
+    Scheduler *scheduler = (Scheduler *)arg;
+    std::string post_data = parse_post_str(req);
+
+    Json::CharReaderBuilder builder;
+    const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    Json::Value root;
+    JSONCPP_STRING errs;
+
+    int result_code = 0;
+    std::string result_msg = "error";
+
+    if (!scheduler)
+    {
+        result_msg = "scheduler is unavailable";
+    }
+    else if (!reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) || !errs.empty())
+    {
+        result_msg = "invalid request parameter";
+    }
+    else
+    {
+        // Parse controlCode: target control or "*" for all
+        const std::string controlCode = root.isMember("controlCode") ? root["controlCode"].asString() : "*";
+
+        // Parse detection engine thresholds
+        float scoreThreshold = root.isMember("detectionConfidence") && root["detectionConfidence"].isNumeric()
+                                   ? root["detectionConfidence"].asFloat()
+                                   : -1.0f;
+        float nmsThreshold = root.isMember("nmsThreshold") && root["nmsThreshold"].isNumeric()
+                                 ? root["nmsThreshold"].asFloat()
+                                 : -1.0f;
+
+        // Build a BehaviorRuleConfig with sleep-pose parameters
+        BehaviorRuleConfig rule;
+        rule.behaviorType = "sleep";
+        rule.enabled = true;
+
+        // Keypoint confidence
+        if (root.isMember("keypointConfidence") && root["keypointConfidence"].isNumeric())
+            rule.keypointConfidence = root["keypointConfidence"].asDouble();
+
+        // Confirm window (input in seconds, stored as milliseconds)
+        if (root.isMember("confirmWindowSec") && root["confirmWindowSec"].isNumeric())
+            rule.thresholdMs = static_cast<int64_t>(root["confirmWindowSec"].asDouble() * 1000.0);
+        else if (root.isMember("confirmWindowMs") && root["confirmWindowMs"].isNumeric())
+            rule.thresholdMs = root["confirmWindowMs"].asInt64();
+
+        // Sleep positive ratio
+        if (root.isMember("sleepPositiveRatio") && root["sleepPositiveRatio"].isNumeric())
+            rule.sleepPositiveRatio = root["sleepPositiveRatio"].asDouble();
+
+        // Head-height ratio max
+        if (root.isMember("headHeightRatioMax") && root["headHeightRatioMax"].isNumeric())
+            rule.headHeightRatioMax = root["headHeightRatioMax"].asDouble();
+
+        // Head-arm distance ratio max
+        if (root.isMember("headArmDistanceRatioMax") && root["headArmDistanceRatioMax"].isNumeric())
+            rule.headArmDistanceRatioMax = root["headArmDistanceRatioMax"].asDouble();
+
+        // Head motion ratio max
+        if (root.isMember("headMotionRatioMax") && root["headMotionRatioMax"].isNumeric())
+            rule.headMotionRatioMax = root["headMotionRatioMax"].asDouble();
+
+        // Recovery time (ms)
+        if (root.isMember("recoveryMs") && root["recoveryMs"].isNumeric())
+            rule.recoveryMs = root["recoveryMs"].asInt64();
+
+        // Torso angle minimum
+        if (root.isMember("torsoAngleDegMin") && root["torsoAngleDegMin"].isNumeric())
+            rule.torsoAngleDegMin = root["torsoAngleDegMin"].asDouble();
+
+        // Shoulder tilt minimum
+        if (root.isMember("shoulderTiltDegMin") && root["shoulderTiltDegMin"].isNumeric())
+            rule.shoulderTiltDegMin = root["shoulderTiltDegMin"].asDouble();
+
+        // Motion window (ms)
+        if (root.isMember("motionWindowMs") && root["motionWindowMs"].isNumeric())
+            rule.motionWindowMs = root["motionWindowMs"].asInt64();
+
+        LOGI("update-algorithm-config: controlCode=%s scoreThreshold=%.3f nmsThreshold=%.3f "
+             "confirmWindowMs=%lld headHeightRatioMax=%.3f sleepPositiveRatio=%.3f",
+             controlCode.c_str(), scoreThreshold, nmsThreshold,
+             (long long)rule.thresholdMs, rule.headHeightRatioMax, rule.sleepPositiveRatio);
+
+        std::vector<std::string> updatedControls;
+        std::string updateMsg;
+        bool success = scheduler->updateAlgorithmConfig(controlCode, rule, scoreThreshold, nmsThreshold, updatedControls, updateMsg);
+
+        if (success)
+        {
+            result_code = 1000;
+            result_msg = updateMsg;
+
+            LOGI("update-algorithm-config success: %s, updated %zu controls", updateMsg.c_str(), updatedControls.size());
+        }
+        else
+        {
+            result_msg = updateMsg;
+            LOGE("update-algorithm-config failed: %s", updateMsg.c_str());
+        }
+    }
+
+    Json::Value result;
+    result["msg"] = result_msg;
+    result["code"] = result_code;
+
+    LOGI("\n \t request:%s \n \t response:%s", root.toStyledString().data(), result.toStyledString().data());
+
+    struct evbuffer *buff = evbuffer_new();
+    evbuffer_add_printf(buff, "%s", result.toStyledString().c_str());
+    evhttp_send_reply(req, HTTP_OK, nullptr, buff);
+    evbuffer_free(buff);
+}
+
+void api_control_live_output(struct evhttp_request *req, void *arg)
+{
+    Scheduler *scheduler = (Scheduler *)arg;
+    std::string post_data = parse_post_str(req);
+
+    Json::CharReaderBuilder builder;
+    const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    Json::Value root;
+    JSONCPP_STRING errs;
+
+    int result_code = 0;
+    std::string result_msg = "error";
+
+    if (!scheduler)
+    {
+        result_msg = "scheduler is unavailable";
+    }
+    else if (!reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) || !errs.empty())
+    {
+        result_msg = "invalid request parameter";
+    }
+    else if (!root["controlCode"].isString() || root["controlCode"].asString().empty())
+    {
+        result_msg = "controlCode is required";
+    }
+    else if (!root["videoEnabled"].isBool() || !root["liveEventEnabled"].isBool())
+    {
+        result_msg = "videoEnabled and liveEventEnabled must be boolean";
+    }
+    else if (!root["wsEventFps"].isNumeric())
+    {
+        result_msg = "wsEventFps must be numeric";
+    }
+    else
+    {
+        const std::string controlCode = root["controlCode"].asString();
+        const bool videoEnabled = root["videoEnabled"].asBool();
+        const bool liveEventEnabled = root["liveEventEnabled"].asBool();
+        const float wsEventFps = root["wsEventFps"].asFloat();
+        const std::string pushStreamUrl = root["pushStreamUrl"].asString();
+
+        if (liveEventEnabled && (wsEventFps <= 0.0f || wsEventFps > 30.0f))
+        {
+            result_msg = "wsEventFps must be greater than 0 and no more than 30";
+        }
+        else
+        {
+            scheduler->apiControlLiveOutput(controlCode,
+                                            videoEnabled,
+                                            liveEventEnabled,
+                                            wsEventFps,
+                                            pushStreamUrl,
+                                            result_code,
+                                            result_msg);
+        }
+    }
+
+    Json::Value result;
+    result["msg"] = result_msg;
+    result["code"] = result_code;
+
+    LOGI("live-output request:%s response:%s", root.toStyledString().data(), result.toStyledString().data());
+
+    struct evbuffer *buff = evbuffer_new();
+    evbuffer_add_printf(buff, "%s", result.toStyledString().c_str());
+    evhttp_send_reply(req, HTTP_OK, nullptr, buff);
+    evbuffer_free(buff);
+}
+
 void api_control_cancel(struct evhttp_request *req, void *arg)
 {
 
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -916,14 +1160,18 @@ void api_control_cancel(struct evhttp_request *req, void *arg)
     int result_code = 0;
     std::string result_msg = "error";
 
-    if (reader->parse(buf, buf + std::strlen(buf), &root, &errs) && errs.empty())
+    if (reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) && errs.empty())
     {
 
         Control control;
 
         if (root["code"].isString())
         {
-            control.code = root["code"].asCString();
+            control.code = root["code"].asString();
+        }
+        else if (root["controlCode"].isString())
+        {
+            control.code = root["controlCode"].asString();
         }
         if (control.validateCancel(result_msg))
         {
@@ -950,8 +1198,7 @@ void api_control_cancel(struct evhttp_request *req, void *arg)
 void api_alarm_bind_media(struct evhttp_request *req, void *arg)
 {
     Scheduler *scheduler = (Scheduler *)arg;
-    char buf[RECV_BUF_MAX_SIZE];
-    parse_post(req, buf);
+    std::string post_data = parse_post_str(req);
 
     Json::CharReaderBuilder builder;
     const std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -962,7 +1209,7 @@ void api_alarm_bind_media(struct evhttp_request *req, void *arg)
     int result_code = 0;
     std::string result_msg = "error";
 
-    if (reader->parse(buf, buf + std::strlen(buf), &root, &errs) && errs.empty())
+    if (reader->parse(post_data.data(), post_data.data() + post_data.size(), &root, &errs) && errs.empty())
     {
         const std::string controlCode = root.isMember("control_code") ? root["control_code"].asString() : "";
         const std::string alarmId = root.isMember("alarm_id") ? root["alarm_id"].asString() : "";
@@ -1033,40 +1280,37 @@ void parse_get(struct evhttp_request *req, struct evkeyvalq *params)
     evhttp_parse_query_str(query, params);
     evhttp_uri_free(decoded);
 }
+std::string parse_post_str(struct evhttp_request *req)
+{
+    if (req == nullptr || req->input_buffer == nullptr)
+    {
+        return "";
+    }
+    size_t post_size = evbuffer_get_length(req->input_buffer);
+    if (post_size == 0)
+    {
+        return "";
+    }
+    unsigned char *pulled = evbuffer_pullup(req->input_buffer, -1);
+    if (pulled == nullptr)
+    {
+        return "";
+    }
+    return std::string(reinterpret_cast<char *>(pulled), post_size);
+}
+
 void parse_post(struct evhttp_request *req, char *buf)
 {
     if (req == nullptr || buf == nullptr)
     {
         return;
     }
-
-    if (buf)
+    buf[0] = '\0';
+    std::string data = parse_post_str(req);
+    if (!data.empty())
     {
-        buf[0] = '\0';
-    }
-
-    size_t post_size = 0;
-
-    post_size = evbuffer_get_length(req->input_buffer);
-    if (post_size <= 0)
-    {
-        //        printf("====line:%d,post msg is empty!\n",__LINE__);
-        return;
-    }
-    else
-    {
-        size_t copy_len = post_size >= RECV_BUF_MAX_SIZE ? (RECV_BUF_MAX_SIZE - 1) : post_size;
-        unsigned char *pulled = evbuffer_pullup(req->input_buffer, -1);
-        if (pulled == nullptr)
-        {
-            return;
-        }
-        //        printf("====line:%d,post len:%d, copy_len:%d\n",__LINE__,post_size,copy_len);
-        if (copy_len > 0)
-        {
-            memcpy(buf, pulled, copy_len);
-        }
+        size_t copy_len = data.size() >= RECV_BUF_MAX_SIZE ? (RECV_BUF_MAX_SIZE - 1) : data.size();
+        memcpy(buf, data.data(), copy_len);
         buf[copy_len] = '\0';
-        //        printf("====line:%d,post msg:%s\n",__LINE__,buf);
     }
 }

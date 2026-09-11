@@ -276,7 +276,8 @@ namespace SVAAnalyzer
         }
 
         /**
-         * @brief Check sleep hit: object stationary + wide aspect ratio (person lying down).
+         * @brief Check sleep hit using Pose state when available, otherwise the legacy
+         * stationary + wide-aspect-ratio rule.
          */
         bool isSleepHit(const BehaviorRuleConfig &rule,
                         const DetectObject &detect,
@@ -289,6 +290,14 @@ namespace SVAAnalyzer
             if (regionState && !regionState->inRegion)
             {
                 return false;
+            }
+
+            if (detect.sleepPose.evaluated)
+            {
+                // RECOVER belongs to the same event until the configured recovery
+                // interval completes, preventing a brief occlusion from ending it.
+                return detect.sleepPose.state == "SLEEP" ||
+                       detect.sleepPose.state == "RECOVER";
             }
 
             const int64_t thresholdMs = std::max<int64_t>(1000, rule.thresholdMs > 0 ? rule.thresholdMs : 15000);

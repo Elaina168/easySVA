@@ -329,7 +329,9 @@
     <select id="selectWaringList" parameterType="HWaring" resultMap="HWaringResult">
         <include refid="selectWaringVo"/>
         <where>
-            <if test="alarm_type_name != null and alarm_type_name != ''">
+            <if test="alarm_type != null and alarm_type != ''">
+                AND alarm_type = #{alarm_type}
+            </if>            <if test="alarm_type_name != null and alarm_type_name != ''">
                 AND alarm_type_name = #{alarm_type_name}
             </if>
             <if test="alarm_level_name != null and alarm_level_name != ''">
@@ -368,6 +370,9 @@
         <where>
             org_index = #{org_index}
             AND is_enable = 1
+            <if test="alarm_type != null and alarm_type != ''">
+                AND alarm_type = #{alarm_type}
+            </if>
             <if test="alarm_type_name != null and alarm_type_name != ''">
                 AND alarm_type_name = #{alarm_type_name}
             </if>

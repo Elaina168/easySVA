@@ -1,4 +1,4 @@
-﻿#ifndef ANALYZER_SERVER_H
+#ifndef ANALYZER_SERVER_H
 #define ANALYZER_SERVER_H
 class Server
 {
@@ -15,9 +15,13 @@ void api_health(struct evhttp_request *req, void *arg);
 void api_controls(struct evhttp_request *req, void *arg);
 void api_control(struct evhttp_request *req, void *arg);
 void api_control_add(struct evhttp_request *req, void *arg);
+void api_control_live_output(struct evhttp_request *req, void *arg);
+void api_control_update_algorithm_config(struct evhttp_request *req, void *arg);
 void api_control_cancel(struct evhttp_request *req, void *arg);
 void api_alarm_bind_media(struct evhttp_request *req, void *arg);
 void parse_get(struct evhttp_request *req, struct evkeyvalq *params);
+#include <string>
+std::string parse_post_str(struct evhttp_request *req);
 void parse_post(struct evhttp_request *req, char *buff);
 
 #endif // ANALYZER_SERVER_H

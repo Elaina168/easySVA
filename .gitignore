@@ -1,0 +1,12 @@
+.idea/
+/ruoyi-admin/
+/ruoyi-common/
+/ruoyi-framework/
+/ruoyi-generator/
+/ruoyi-quartz/
+/ruoyi-system/
+/SVA-server/build/
+/SVA-server/build-dev/
+/SVA-mediaServer/build-gb28181/
+*.tar
+*.tar.gz

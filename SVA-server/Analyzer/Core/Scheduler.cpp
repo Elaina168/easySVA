@@ -1,9 +1,11 @@
-﻿#include "Scheduler.h"
+#include "Scheduler.h"
 #include "Config.h"
 #include "Control.h"
 #include "Worker.h"
 #include "Algorithm.h"
 #include "AlgorithmOnYolo.h"
+#include "AlgorithmOnYoloPose.h"
+#include "SleepPoseEvaluator.h"
 #include "GenerateAlarmVideo.h"
 #include "Utils/Common.h"
 #include "Utils/Log.h"
@@ -59,6 +61,36 @@ namespace SVAAnalyzer
         bool isSequenceBehaviorRule(const BehaviorRuleConfig &rule)
         {
             return rule.enabled && !rule.sequenceId.empty() && !isAggregateBehaviorType(rule.behaviorType);
+        }
+
+        bool resolveSleepPoseConfig(const Control &control, SleepPoseConfig &config)
+        {
+            for (const BehaviorRuleConfig &rule : control.behaviorRules)
+            {
+                if (!rule.enabled || rule.behaviorType != "sleep")
+                {
+                    continue;
+                }
+                config.keypointConfidence = static_cast<float>(rule.keypointConfidence);
+                config.confirmWindowMs = rule.thresholdMs > 0 ? rule.thresholdMs : 15000;
+                config.sleepPositiveRatio = static_cast<float>(rule.sleepPositiveRatio);
+                config.minimumValidRatio = static_cast<float>(rule.minimumValidRatio);
+                config.recoveryMs = rule.recoveryMs;
+                config.headHeightRatioMax = static_cast<float>(rule.headHeightRatioMax);
+                config.headSideRatioMin = static_cast<float>(rule.headSideRatioMin);
+                config.headArmDistanceRatioMax = static_cast<float>(rule.headArmDistanceRatioMax);
+                config.torsoAngleDegMin = static_cast<float>(rule.torsoAngleDegMin);
+                config.shoulderTiltDegMin = static_cast<float>(rule.shoulderTiltDegMin);
+                config.motionWindowMs = rule.motionWindowMs;
+                config.headMotionRatioMax = static_cast<float>(rule.headMotionRatioMax);
+                return true;
+            }
+            return false;
+        }
+
+        std::string sleepPoseContextKey(const Control &control, const std::string &streamCode)
+        {
+            return streamCode + "\x1f" + control.code;
         }
 
         std::string safeMediaPathSegment(const std::string &value)
@@ -141,6 +173,10 @@ namespace SVAAnalyzer
             delete on_yolo26n_80;
             on_yolo26n_80 = nullptr;
         }
+        if (on_yolo11n_pose) {
+            delete on_yolo11n_pose;
+            on_yolo11n_pose = nullptr;
+        }
 
         clearAlarmQueue();
         clearDetectFrameQueue();
@@ -187,7 +223,44 @@ namespace SVAAnalyzer
         modelPath = mConfig->modelDir + "/yolo26s.onnx";
         on_yolo26n_80 = new AlgorithmOnYolo(mConfig, modelPath, classNames, "on_yolo26n_80");
 
-        LOGI("initAlgorithm() end - total ONNX models loaded: 2");
+        int loadedModelCount = 2;
+        std::string selectedPoseModel = mConfig->sleepModelFile.empty() ? "yolo11n-pose.onnx" : mConfig->sleepModelFile;
+        modelPath = mConfig->modelDir + "/" + selectedPoseModel;
+        std::ifstream poseModel(modelPath, std::ios::binary);
+        if (!poseModel.good())
+        {
+            std::vector<std::string> candidates = {"yolo11n-pose.onnx", "sleep_yolopose.onnx"};
+            for (const auto &cand : candidates)
+            {
+                std::string testPath = mConfig->modelDir + "/" + cand;
+                std::ifstream testFile(testPath, std::ios::binary);
+                if (testFile.good())
+                {
+                    testFile.close();
+                    modelPath = testPath;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            poseModel.close();
+        }
+
+        std::ifstream finalCheck(modelPath, std::ios::binary);
+        if (finalCheck.good())
+        {
+            finalCheck.close();
+            LOGI("初始化 on_yolo11n_pose / sleep_yolopose (%s)", modelPath.c_str());
+            on_yolo11n_pose = new AlgorithmOnYoloPose(mConfig, modelPath, "on_yolo11n_pose");
+            ++loadedModelCount;
+        }
+        else
+        {
+            LOGI("跳过 on_yolo11n_pose / sleep_yolopose，模型未安装: %s", modelPath.c_str());
+        }
+
+        LOGI("initAlgorithm() end - total ONNX models loaded: %d", loadedModelCount);
         return true;
     }
     void Scheduler::loop()
@@ -315,6 +388,38 @@ namespace SVAAnalyzer
             }
         }
     }
+
+    void Scheduler::apiControlLiveOutput(const std::string &code,
+                                         bool videoEnabled,
+                                         bool liveEventEnabled,
+                                         float wsEventFps,
+                                         const std::string &pushStreamUrl,
+                                         int &result_code,
+                                         std::string &result_msg)
+    {
+        std::lock_guard<std::mutex> lock(mWorkerMapMtx);
+        auto it = mWorkerMap.find(code);
+        if (it == mWorkerMap.end() || !it->second)
+        {
+            result_code = 0;
+            result_msg = "the control does not exist";
+            return;
+        }
+
+        if (it->second->updateLiveOutput(code,
+                                         videoEnabled,
+                                         liveEventEnabled,
+                                         wsEventFps,
+                                         pushStreamUrl,
+                                         result_msg))
+        {
+            result_code = 1000;
+            return;
+        }
+
+        result_code = 0;
+    }
+
     void Scheduler::apiControlCancel(Control *control, int &result_code, std::string &result_msg)
     {
 
@@ -718,6 +823,58 @@ namespace SVAAnalyzer
                 item["className"] = obj.className;
                 item["algorithmCode"] = obj.algorithmCode;
                 item["happen"] = obj.happen;
+                item["hasPose"] = obj.hasPose;
+                if (obj.hasPose)
+                {
+                    Json::Value keypoints(Json::arrayValue);
+                    for (size_t keypointIndex = 0; keypointIndex < obj.keypoints.size(); ++keypointIndex)
+                    {
+                        const PoseKeypoint &keypoint = obj.keypoints[keypointIndex];
+                        Json::Value point;
+                        point["index"] = static_cast<Json::UInt>(keypointIndex);
+                        point["x"] = keypoint.x;
+                        point["y"] = keypoint.y;
+                        point["confidence"] = keypoint.confidence;
+                        keypoints.append(point);
+                    }
+                    item["keypoints"] = keypoints;
+                }
+                if (obj.sleepPose.evaluated)
+                {
+                    Json::Value sleepPose;
+                    sleepPose["featuresValid"] = obj.sleepPose.featuresValid;
+                    sleepPose["invalidReason"] = obj.sleepPose.invalidReason;
+                    sleepPose["validKeypointCount"] = obj.sleepPose.validKeypointCount;
+                    auto appendOptionalFloat = [&sleepPose](const char *name,
+                                                            const std::optional<float> &value)
+                    {
+                        if (value.has_value())
+                        {
+                            sleepPose[name] = *value;
+                        }
+                    };
+                    appendOptionalFloat("headX", obj.sleepPose.headX);
+                    appendOptionalFloat("headY", obj.sleepPose.headY);
+                    appendOptionalFloat("shoulderCenterX", obj.sleepPose.shoulderCenterX);
+                    appendOptionalFloat("shoulderCenterY", obj.sleepPose.shoulderCenterY);
+                    appendOptionalFloat("shoulderWidth", obj.sleepPose.shoulderWidth);
+                    appendOptionalFloat("headHeightRatio", obj.sleepPose.headHeightRatio);
+                    appendOptionalFloat("headPitchProxyDeg", obj.sleepPose.headPitchProxyDeg);
+                    appendOptionalFloat("headSideRatio", obj.sleepPose.headSideRatio);
+                    appendOptionalFloat("shoulderAngleDeg", obj.sleepPose.shoulderAngleDeg);
+                    appendOptionalFloat("headArmDistanceRatio", obj.sleepPose.headArmDistanceRatio);
+                    appendOptionalFloat("torsoAngleDeg", obj.sleepPose.torsoAngleDeg);
+                    appendOptionalFloat("headMotionRatio", obj.sleepPose.headMotionRatio);
+                    sleepPose["candidate"] = obj.sleepPose.candidate;
+                    sleepPose["sleepScore"] = obj.sleepPose.sleepScore;
+                    sleepPose["validRatio"] = obj.sleepPose.validRatio;
+                    sleepPose["positiveRatio"] = obj.sleepPose.positiveRatio;
+                    sleepPose["state"] = obj.sleepPose.state;
+                    sleepPose["transitioned"] = obj.sleepPose.transitioned;
+                    sleepPose["alert"] = obj.sleepPose.alert;
+                    sleepPose["evidence"] = obj.sleepPose.evidence;
+                    item["sleepPose"] = sleepPose;
+                }
                 item["trackId"] = obj.trackId;
                 item["ruleId"] = obj.ruleId;
                 item["customEventName"] = obj.customEventName;
@@ -1994,6 +2151,17 @@ namespace SVAAnalyzer
     {
         std::lock_guard<std::mutex> lock(mStreamTemporalMtx);
         mStreamTemporalContextMap.erase(streamCode);
+        for (auto it = mSleepPoseContextMap.begin(); it != mSleepPoseContextMap.end();)
+        {
+            if (it->second.streamCode == streamCode)
+            {
+                it = mSleepPoseContextMap.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
     }
 
     /**
@@ -2006,6 +2174,63 @@ namespace SVAAnalyzer
      * - speed, direction, motion state
      * - region enter/exit/dwell states
      */
+    bool Scheduler::updateAlgorithmConfig(const std::string &controlCode,
+                                         const BehaviorRuleConfig &rule,
+                                         float scoreThreshold,
+                                         float nmsThreshold,
+                                         std::vector<std::string> &updatedControls,
+                                         std::string &msg)
+    {
+        // 1. Update ONNX Runtime detection thresholds if specified
+        if (scoreThreshold > 0.0f)
+        {
+            if (on_yolo11n_pose) on_yolo11n_pose->setDetectionConfidence(scoreThreshold);
+            if (on_yolo11n_80) on_yolo11n_80->setDetectionConfidence(scoreThreshold);
+        }
+        if (nmsThreshold > 0.0f)
+        {
+            if (on_yolo11n_pose) on_yolo11n_pose->setNmsThreshold(nmsThreshold);
+            if (on_yolo11n_80) on_yolo11n_80->setNmsThreshold(nmsThreshold);
+        }
+
+        // 2. Broadcast or target update to active workers
+        std::lock_guard<std::mutex> lock(mWorkerMapMtx);
+        std::unordered_set<Worker *> visitedWorkers;
+        bool anyWorkerUpdated = false;
+
+        for (auto &pair : mWorkerMap)
+        {
+            Worker *worker = pair.second;
+            if (!worker || visitedWorkers.count(worker))
+            {
+                continue;
+            }
+            visitedWorkers.insert(worker);
+
+            std::string subMsg;
+            if (worker->updateAlgorithmConfig(controlCode, rule, scoreThreshold, nmsThreshold, updatedControls, subMsg))
+            {
+                anyWorkerUpdated = true;
+            }
+        }
+
+        if (anyWorkerUpdated || !updatedControls.empty())
+        {
+            msg = "algorithm config updated";
+            return true;
+        }
+
+        // If no active worker matched but thresholds were updated globally
+        if (scoreThreshold > 0.0f || nmsThreshold > 0.0f)
+        {
+            msg = "global algorithm detection thresholds updated";
+            return true;
+        }
+
+        msg = "no matching control found to update";
+        return false;
+    }
+
     void Scheduler::updateTemporalTracks(const Control &control,
                                           const std::string &streamCode,
                                           std::vector<DetectObject *> detects,
@@ -2019,6 +2244,23 @@ namespace SVAAnalyzer
         
         // Run the tracker
         TemporalProcessor::updateStream(context, control, detects, timestampMs);
+
+        SleepPoseConfig sleepConfig;
+        if (resolveSleepPoseConfig(control, sleepConfig))
+        {
+            const std::string contextKey = sleepPoseContextKey(control, streamCode);
+            SleepPoseStreamContext &sleepContext = mSleepPoseContextMap[contextKey];
+            sleepContext.streamCode = streamCode;
+            sleepContext.controlCode = control.code;
+            SleepPoseProcessor::updateStream(sleepContext,
+                                             detects,
+                                             timestampMs,
+                                             sleepConfig);
+        }
+        else
+        {
+            mSleepPoseContextMap.erase(sleepPoseContextKey(control, streamCode));
+        }
     }
 
     /**

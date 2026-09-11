@@ -6,6 +6,7 @@ import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.common.utils.poi.ExcelUtil;
 import com.ruoyi.waring.domain.HDevice;
+import com.ruoyi.waring.domain.PtzCommandDTO;
 import com.ruoyi.waring.service.HDeviceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -205,5 +206,26 @@ public class HDeviceController extends BaseController {
             return "连接超时";
         }
         return message;
+    }
+
+    /**
+     * 同步 ZLMediaKit 中的 GB28181 国标设备（幂等）
+     */
+    @PostMapping("/gb28181/sync")
+    public AjaxResult syncGbDevices() {
+        int count = hDeviceService.syncGbDevices();
+        return AjaxResult.success("国标设备同步完成，共处理 " + count + " 台", count);
+    }
+
+    /**
+     * 云台控制 (PTZ) 接口
+     */
+    @PreAuthorize("@ss.hasPermi('waring:device:query') or @ss.hasPermi('waring:device:edit')")
+    @PostMapping("/ptz/{apeId}")
+    public AjaxResult ptzControl(@PathVariable String apeId, @RequestBody(required = false) PtzCommandDTO dto) {
+        String command = dto != null ? dto.getCommand() : "stop";
+        Integer speed = dto != null ? dto.getSpeed() : 32;
+        Map<String, Object> result = hDeviceService.ptzControl(apeId, command, speed);
+        return AjaxResult.success("云台控制指令已下发", result);
     }
 }

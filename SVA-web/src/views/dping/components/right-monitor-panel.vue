@@ -58,6 +58,7 @@
 import flvjs from 'flv.js'
 import { getDeviceList, previewDeviceMonitor } from '@/api/device'
 import { getAlarmPhoto } from '@/api/system/kanban'
+import { extractPlayableUrl, isBrowserPlayableUrl, isFlvUrl } from '@/utils/mediaPlayback'
 
 export default {
   name: 'RightMonitorPanel',
@@ -104,14 +105,6 @@ export default {
       if (status === 'loading') return '加载中'
       if (status === 'failed') return '失败'
       return '空闲'
-    },
-
-    extractPreviewUrl(response) {
-      if (!response) {
-        return ''
-      }
-      const data = response.data || response
-      return data.playUrl || data.previewUrl || data.url || data.streamUrl || data.rtspUrl || data.flvUrl || data.directSourceUrl || data.direct_source_url || data.liveUrl || data.live_url || ''
     },
 
     normalizeDevice(item) {
@@ -269,8 +262,8 @@ export default {
           if (sessionId !== this.realtimeSession || this.activeTab !== 'realtime') {
             return
           }
-          const previewUrl = this.extractPreviewUrl(response)
-          if (!previewUrl) {
+          const previewUrl = extractPlayableUrl(response)
+          if (!isBrowserPlayableUrl(previewUrl)) {
             this.updateStreamCard(index, { status: 'failed', previewUrl: '' })
             continue
           }
@@ -292,32 +285,41 @@ export default {
       }
 
       this.destroyStreamPlayer(index)
-      const isFlv = /\.flv($|[?#])/i.test(url)
-      const isHttpOrWs = /^(https?:\/\/|wss?:\/\/)/i.test(url)
+      const playableUrl = extractPlayableUrl(url)
+      if (!isBrowserPlayableUrl(playableUrl)) {
+        this.updateStreamCard(index, { status: 'failed', previewUrl: '' })
+        return
+      }
+      const isFlv = isFlvUrl(playableUrl)
 
-      if (isFlv && isHttpOrWs && flvjs.isSupported()) {
+      if (isFlv && flvjs.isSupported()) {
         const player = flvjs.createPlayer({
           type: 'flv',
-          url,
+          url: playableUrl,
           isLive: true
         })
         player.attachMediaElement(video)
         player.load()
         player.play().then(() => {
-          this.updateStreamCard(index, { status: 'playing', previewUrl: url, player })
+          this.updateStreamCard(index, { status: 'playing', previewUrl: playableUrl, player })
         }).catch(() => {
-          this.updateStreamCard(index, { status: 'failed', previewUrl: url, player: null })
+          this.updateStreamCard(index, { status: 'failed', previewUrl: playableUrl, player: null })
           this.destroyStreamPlayer(index)
         })
-        this.updateStreamCard(index, { player, previewUrl: url })
+        this.updateStreamCard(index, { player, previewUrl: playableUrl })
         return
       }
 
-      video.src = url
+      if (isFlv) {
+        this.updateStreamCard(index, { status: 'failed', previewUrl: '' })
+        return
+      }
+
+      video.src = playableUrl
       video.play().then(() => {
-        this.updateStreamCard(index, { status: 'playing', previewUrl: url })
+        this.updateStreamCard(index, { status: 'playing', previewUrl: playableUrl })
       }).catch(() => {
-        this.updateStreamCard(index, { status: 'failed', previewUrl: url })
+        this.updateStreamCard(index, { status: 'failed', previewUrl: playableUrl })
       })
     },
 

@@ -21,6 +21,9 @@ public class HDevice extends BaseEntity {
     private String zlm_proxy_key;
     private String resource_type;
     private String sub_type;
+    private String device_type;
+    private String gb_device_id;
+    private String gb_platform_id;
     @Excel(name = "IP地址")
     private String ip_addr;
     @Excel(name = "端口号")
@@ -39,4 +42,7 @@ public class HDevice extends BaseEntity {
     private String monitor_status;
     private String create_time;
     private String update_time;
+
+    /** 最后心跳时间 */
+    private String last_keepalive_at;
 }

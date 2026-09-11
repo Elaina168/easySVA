@@ -1,4 +1,4 @@
-﻿#include "GenerateAlarmVideo.h"
+#include "GenerateAlarmVideo.h"
 #include "Config.h"
 #include "Utils/Log.h"
 #include "Utils/Common.h"
@@ -25,7 +25,11 @@ namespace SVAAnalyzer
         {
             if (!hasAlarmId)
             {
-                return "";
+                if (!configuredUrl.empty())
+                {
+                    return configuredUrl;
+                }
+                return adminHost + "/waring/waring/addFromSvaSimple";
             }
 
             if (!configuredUrl.empty())

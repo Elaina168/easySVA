@@ -101,6 +101,9 @@ public class DeploymentAnalyzerClient
         if (pushStream)
         {
             payload.put("pushStreamUrl", pushStreamUrl);
+            // [修复] 本机有 NVIDIA GPU, Analyzer 应使用 h264_nvenc 硬编码推流(与部署初期一致);
+            // 显式 auto 让 Analyzer 自行选择硬件编码器, 避免默认行为异常导致推流失败。
+            payload.put("pushEncoder", "auto");
         }
         String renderMode = pushStream ? "server_overlay" : (frontendOverlayEnabled ? "ws_overlay" : "detect_only");
         payload.put("renderMode", renderMode);
@@ -253,6 +256,37 @@ public class DeploymentAnalyzerClient
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("code", task.getDeploymentId());
         return postJson(bindingConfig.getAnalyzerBaseUrl() + "/api/control/cancel", payload, "cancel");
+    }
+
+    public AnalyzerResult updateLiveOutput(DeploymentTask task, boolean videoEnabled,
+                                           boolean liveEventEnabled, float wsEventFps)
+    {
+        if (task == null || StringUtils.isEmpty(task.getDeploymentId()))
+        {
+            return AnalyzerResult.fail("布控任务不存在");
+        }
+        BindingConfig bindingConfig = resolveBinding(task.getDeviceId());
+        if (bindingConfig == null)
+        {
+            return AnalyzerResult.fail("未绑定可用服务器或配置缺失");
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("controlCode", task.getDeploymentId());
+        payload.put("videoEnabled", videoEnabled);
+        payload.put("liveEventEnabled", liveEventEnabled);
+        payload.put("wsEventFps", wsEventFps);
+        if (videoEnabled)
+        {
+            String pushStreamUrl = buildPushStreamUrl(bindingConfig, task.getDeploymentId());
+            if (StringUtils.isEmpty(pushStreamUrl))
+            {
+                return AnalyzerResult.fail("无法生成算法流推送地址");
+            }
+            payload.put("pushStreamUrl", pushStreamUrl);
+        }
+        return postJson(bindingConfig.getAnalyzerBaseUrl() + "/api/control/live-output",
+            payload, "live-output");
     }
 
     public AnalyzerResult cancelControl(String deploymentId)
@@ -478,8 +512,11 @@ public class DeploymentAnalyzerClient
 
         String zlmApp = StringUtils.isBlank(zlmServer.getApp()) ? DEFAULT_ZLM_APP : zlmServer.getApp().trim();
         String svaApp = StringUtils.isBlank(svaServer.getApp()) ? DEFAULT_SVA_APP : svaServer.getApp().trim();
+        Integer rtmpPort = zlmServer.getMedia_rtmp_port();
+        int effectiveRtmpPort = (rtmpPort != null && rtmpPort > 0) ? rtmpPort : 9995;
         return new BindingConfig(zlmServer.getHost().trim(), zlmApp, zlmServer.getMedia_rtsp_port(),
-            zlmServer.getMedia_http_port(), svaServer.getHost().trim(), svaApp, svaServer.getAnalyzer_port());
+            effectiveRtmpPort, zlmServer.getMedia_http_port(), svaServer.getHost().trim(), svaApp,
+            svaServer.getAnalyzer_port());
     }
 
     private String buildStreamUrl(BindingConfig config, String apeId)
@@ -497,6 +534,8 @@ public class DeploymentAnalyzerClient
         {
             return null;
         }
+        // [修复] 恢复 RTSP 推流(与部署初期 master 版一致): Analyzer 使用 h264_nvenc 硬编码
+        // 推 RTSP 到 ZLM 才成功; 推 RTMP 会报 push stream connect error, 布控无法生效。
         return "rtsp://" + config.zlmHost + ":" + config.zlmMediaRtspPort + "/" + config.svaApp + "/" + deploymentId;
     }
 
@@ -524,17 +563,19 @@ public class DeploymentAnalyzerClient
         private final String zlmHost;
         private final String zlmApp;
         private final int zlmMediaRtspPort;
+        private final int zlmMediaRtmpPort;
         private final int zlmMediaHttpPort;
         private final String svaHost;
         private final String svaApp;
         private final int svaAnalyzerPort;
 
-        private BindingConfig(String zlmHost, String zlmApp, int zlmMediaRtspPort, int zlmMediaHttpPort,
-            String svaHost, String svaApp, int svaAnalyzerPort)
+        private BindingConfig(String zlmHost, String zlmApp, int zlmMediaRtspPort, int zlmMediaRtmpPort,
+            int zlmMediaHttpPort, String svaHost, String svaApp, int svaAnalyzerPort)
         {
             this.zlmHost = zlmHost;
             this.zlmApp = zlmApp;
             this.zlmMediaRtspPort = zlmMediaRtspPort;
+            this.zlmMediaRtmpPort = zlmMediaRtmpPort;
             this.zlmMediaHttpPort = zlmMediaHttpPort;
             this.svaHost = svaHost;
             this.svaApp = svaApp;

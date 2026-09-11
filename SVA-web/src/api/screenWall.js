@@ -39,6 +39,11 @@ function toEnabledInt(value, defaultValue = 1) {
   return toBoolean(value, defaultValue !== 0) ? 1 : 0
 }
 
+export function normalizeSourceType(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return normalized === 'task' || normalized === 'realtime' ? normalized : ''
+}
+
 export function buildScreenWallUpsertPayload(source = {}) {
   const slotIndexRaw = pickValue(source, ['slotIndex', 'slot_index'], null)
   const slotIndex = slotIndexRaw === null || slotIndexRaw === '' || slotIndexRaw === undefined
@@ -47,7 +52,7 @@ export function buildScreenWallUpsertPayload(source = {}) {
 
   return {
     wallCode: pickValue(source, ['wallCode', 'wall_code'], 'main') || 'main',
-    sourceType: pickValue(source, ['sourceType', 'source_type'], ''),
+    sourceType: normalizeSourceType(pickValue(source, ['sourceType', 'source_type'], '')),
     sourceId: pickValue(source, ['sourceId', 'source_id', 'id'], ''),
     deviceId: pickValue(source, ['deviceId', 'device_id', 'apeId', 'ape_id'], ''),
     playUrl: pickValue(source, ['playUrl', 'play_url', 'previewUrl', 'preview_url', 'streamUrl', 'stream_url'], ''),
@@ -73,10 +78,14 @@ export function normalizeScreenWallStream(source = {}) {
 }
 
 export function upsertScreenWallStream(data) {
+  const payload = buildScreenWallUpsertPayload(data)
+  if (!payload.sourceType) {
+    return Promise.reject(new Error('监控墙源类型只支持 realtime 或 task'))
+  }
   return request({
     url: '/screen-wall/streams/upsert',
     method: 'post',
-    data: buildScreenWallUpsertPayload(data)
+    data: payload
   })
 }
 

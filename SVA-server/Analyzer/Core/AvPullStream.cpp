@@ -1,4 +1,4 @@
-﻿#include "AvPullStream.h"
+#include "AvPullStream.h"
 #include "Config.h"
 #include "Utils/Log.h"
 #include "Utils/Common.h"
@@ -27,23 +27,95 @@ namespace SVAAnalyzer
         closeConnect();
     }
 
+    std::string AvPullStream::normalizeStreamUrl(const std::string &sourceUrl, int defaultRtspPort)
+    {
+        const std::string gbPrefix = "gb28181://";
+        const std::string shortGbPrefix = "gb://";
+        std::string value = sourceUrl;
+        std::string prefix;
+        if (value.rfind(gbPrefix, 0) == 0) prefix = gbPrefix;
+        else if (value.rfind(shortGbPrefix, 0) == 0) prefix = shortGbPrefix;
+        if (prefix.empty()) return value;
+
+        std::string authorityAndPath = value.substr(prefix.size());
+        const size_t slash = authorityAndPath.find('/');
+        std::string authority = slash == std::string::npos ? authorityAndPath : authorityAndPath.substr(0, slash);
+        std::string path = slash == std::string::npos ? "" : authorityAndPath.substr(slash);
+        if (authority.empty()) return value;
+        // GB playback URLs are normally `host:port/app/stream`. When a port
+        // is omitted, use the configured ZLMediaKit RTSP port.
+        if (authority.find(':') == std::string::npos && defaultRtspPort > 0)
+        {
+            authority += ":" + std::to_string(defaultRtspPort);
+        }
+        if (path.empty() || path == "/")
+        {
+            LOGE("invalid GB28181 playback URL (missing app/stream): %s", sourceUrl.c_str());
+            return value;
+        }
+        return "rtsp://" + authority + path;
+    }
+
     bool AvPullStream::connect()
     {
+        const int defaultRtspPort = (mWorker && mWorker->mScheduler && mWorker->mScheduler->getConfig())
+            ? mWorker->mScheduler->getConfig()->mediaRtspPort : 9994;
+        const std::string sourceUrl = (mWorker && mWorker->mControl) ? mWorker->mControl->streamUrl : "";
+        std::string streamUrl = normalizeStreamUrl(sourceUrl, defaultRtspPort);
+        if (streamUrl != sourceUrl)
+        {
+            LOGI("GB28181 source normalized for unified decoder: %s -> %s", sourceUrl.c_str(), streamUrl.c_str());
+        }
 
-        std::string streamUrl = mWorker->mControl->streamUrl;
-        mFmtCtx = avformat_alloc_context();
+        const bool isGbStream = (mWorker && mWorker->mControl && mWorker->mControl->streamProtocol == "gb28181") ||
+                                (sourceUrl.rfind("gb28181://", 0) == 0 || sourceUrl.rfind("gb://", 0) == 0);
 
-        AVDictionary *fmt_options = NULL;
-        av_dict_set(&fmt_options, "rtsp_transport", "tcp", 0); // 设置rtsp底层网络协议 tcp or udp
-        av_dict_set(&fmt_options, "stimeout", "10000000", 0);  // 设置rtsp连接超时（单位 us）1秒=1000000
-        av_dict_set(&fmt_options, "rw_timeout", "1000000", 0); // 设置rtmp/http-flv连接超时（单位 us）
-        // av_dict_set(&fmt_options, "timeout", "1000000", 0);//设置udp/http超时（单位 us）
+        // For GB28181 streams, ZLMediaKit may take 1-3 seconds to begin receiving RTP stream
+        // after SIP INVITE, so retry initial probe up to 5 times.
+        const int maxAttempts = isGbStream ? 5 : 1;
+        int ret = -1;
 
-        int ret = avformat_open_input(&mFmtCtx, streamUrl.data(), NULL, &fmt_options);
+        for (int attempt = 1; attempt <= maxAttempts; ++attempt)
+        {
+            mFmtCtx = avformat_alloc_context();
+
+            AVDictionary *fmt_options = NULL;
+            av_dict_set(&fmt_options, "rtsp_transport", "tcp", 0); // 设置rtsp底层网络协议 tcp or udp
+            av_dict_set(&fmt_options, "stimeout", "10000000", 0);  // 设置rtsp连接超时（单位 us）1秒=1000000
+            av_dict_set(&fmt_options, "rw_timeout", "1000000", 0); // 设置rtmp/http-flv连接超时（单位 us）
+
+            ret = avformat_open_input(&mFmtCtx, streamUrl.data(), NULL, &fmt_options);
+            if (fmt_options)
+            {
+                av_dict_free(&fmt_options);
+            }
+
+            if (ret == 0)
+            {
+                if (attempt > 1)
+                {
+                    LOGI("avformat_open_input success on attempt %d for GB28181 stream: %s", attempt, streamUrl.c_str());
+                }
+                break;
+            }
+
+            if (mFmtCtx)
+            {
+                avformat_close_input(&mFmtCtx);
+                mFmtCtx = NULL;
+            }
+
+            if (attempt < maxAttempts)
+            {
+                LOGI("GB28181 stream waiting for RTP ingestion (attempt %d/%d), retry in 1s: %s",
+                     attempt, maxAttempts, streamUrl.c_str());
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            }
+        }
 
         if (ret != 0)
         {
-            LOGE("avformat_open_input error: url=%s ", streamUrl.data());
+            LOGE("avformat_open_input error: url=%s (ret=%d)", streamUrl.data(), ret);
             return false;
         }
 
@@ -109,16 +181,21 @@ namespace SVAAnalyzer
             // mVideoCodecCtx->thread_count = 1;
 
             mVideoStream = mFmtCtx->streams[mWorker->mControl->videoIndex];
-            if (0 == mVideoStream->avg_frame_rate.den)
+            if (0 == mVideoStream->avg_frame_rate.den || mVideoStream->avg_frame_rate.num <= 0)
             {
 
-                LOGE("videoIndex=%d,videoStream->avg_frame_rate.den = 0", mWorker->mControl->videoIndex);
+                LOGI("videoIndex=%d, invalid avg_frame_rate %d/%d, fallback to 25fps",
+                     mWorker->mControl->videoIndex, mVideoStream->avg_frame_rate.num, mVideoStream->avg_frame_rate.den);
 
                 mWorker->mControl->videoFps = 25;
             }
             else
             {
                 mWorker->mControl->videoFps = mVideoStream->avg_frame_rate.num / mVideoStream->avg_frame_rate.den;
+                if (mWorker->mControl->videoFps <= 0)
+                {
+                    mWorker->mControl->videoFps = 25;
+                }
             }
 
             mWorker->mControl->videoWidth = mVideoCodecCtx->width;

@@ -24,6 +24,8 @@ public interface HDeviceService {
 
     Map<String, Object> getDirectLiveUrl(String apeId);
 
+    int syncGbDevices();
+
     List<HDevice> selectLDeviceList(HDevice device, Long userId);
 
     int startMonitor(String apeId);
@@ -31,4 +33,6 @@ public interface HDeviceService {
     int stopMonitor(String apeId);
 
     Map<String, Object> previewMonitor(String apeId);
+
+    Map<String, Object> ptzControl(String apeId, String command, Integer speed);
 }

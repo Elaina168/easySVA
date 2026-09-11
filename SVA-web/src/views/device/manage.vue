@@ -76,13 +76,38 @@
           v-hasPermi="['waring:device:remove']"
         >删除</el-button>
       </el-col>
+      <el-col :span="1.5">
+        <el-button
+          type="warning"
+          plain
+          icon="el-icon-video-camera"
+          size="mini"
+          @click="goToRealtime()"
+        >实时监控中心</el-button>
+      </el-col>
+      <el-col :span="1.5">
+        <el-button
+          type="info"
+          plain
+          icon="el-icon-refresh"
+          size="mini"
+          @click="syncGbDevices"
+        >同步国标设备</el-button>
+      </el-col>
     </el-row>
 
     <el-table v-loading="loading" :data="deviceList" @selection-change="handleSelectionChange">
       <el-table-column type="selection" width="50" align="center" />
       <el-table-column label="设备编码" prop="ape_id" align="center" :show-overflow-tooltip="true" />
       <el-table-column label="设备名称" prop="name" align="center" :show-overflow-tooltip="true" />
-      <el-table-column label="设备类型" prop="stream_source_type" align="center">
+      <el-table-column label="协议类型" prop="device_type" align="center">
+        <template slot-scope="scope">
+          <el-tag size="mini" :type="String(scope.row.device_type).toLowerCase() === 'gb28181' ? 'success' : 'info'">
+            {{ formatDeviceType(scope.row.device_type) }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="流来源" prop="stream_source_type" align="center">
         <template slot-scope="scope">
           <el-tag size="mini" :type="scope.row.stream_source_type === 'PLATFORM' ? 'success' : 'info'">
             {{ formatSourceType(scope.row.stream_source_type) }}
@@ -95,12 +120,21 @@
       <el-table-column label="组织编码" prop="org_index" align="center" :show-overflow-tooltip="true" />
       <el-table-column label="组织名称" prop="org_name" align="center" :show-overflow-tooltip="true" />
       <el-table-column label="位置" prop="place" align="center" :show-overflow-tooltip="true" />
-      <el-table-column label="在线状态" prop="is_online" align="center">
+      <el-table-column label="在线状态" prop="is_online" align="center" width="100">
         <template slot-scope="scope">
-          <span>{{ renderOnline(scope.row.is_online) }}</span>
+          <el-tag size="mini" :type="String(scope.row.is_online) === '1' ? 'success' : 'info'">
+            {{ formatOnline(scope.row.is_online) }}
+          </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" align="center" fixed="right" class-name="small-padding fixed-width operation-column" width="410">
+      <el-table-column label="监控状态" prop="monitor_status" align="center" width="100">
+        <template slot-scope="scope">
+          <el-tag size="mini" :type="monitorStatusType(scope.row.monitor_status)">
+            {{ formatMonitorStatus(scope.row.monitor_status) }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" align="center" fixed="right" class-name="small-padding fixed-width operation-column" width="460">
         <template slot-scope="scope">
           <el-button
             size="mini"
@@ -116,6 +150,13 @@
             @click="stopMonitor(scope.row)"
             v-hasPermi="['waring:device:stop']"
           >停止监控</el-button>
+          <el-button
+            size="mini"
+            type="text"
+            icon="el-icon-monitor"
+            style="color: #e6a23c;"
+            @click="goToRealtime(scope.row)"
+          >进入监控</el-button>
           <el-button
             size="mini"
             type="text"
@@ -176,8 +217,8 @@
       <el-form ref="form" :model="form" :rules="rules" label-width="90px">
         <el-row>
           <el-col :span="12">
-            <el-form-item label="设备类型" prop="stream_source_type">
-              <el-select v-model="form.stream_source_type" placeholder="请选择设备类型" style="width: 100%" @change="handleSourceTypeChange">
+            <el-form-item label="流来源" prop="stream_source_type">
+              <el-select v-model="form.stream_source_type" placeholder="请选择流来源" style="width: 100%" @change="handleSourceTypeChange">
                 <el-option v-for="item in streamSourceTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
@@ -273,10 +314,11 @@
 </template>
 
 <script>
-import { getDeviceList, getDevice, addDevice, updateDevice, delDevice, startDeviceMonitor, stopDeviceMonitor, previewDeviceMonitor } from '@/api/device'
+import { getDeviceList, getDevice, addDevice, updateDevice, delDevice, startDeviceMonitor, stopDeviceMonitor, previewDeviceMonitor, syncGbDevices as syncGbDevicesApi } from '@/api/device'
 import { deptTreeSelect } from '@/api/system/user'
 import player from '@/components/RTSPPlayer'
 import devicewarning from './components/device-warning.vue'
+import { extractPlayableUrl } from '@/utils/mediaPlayback'
 
 export default {
   name: 'DeviceManage',
@@ -284,7 +326,7 @@ export default {
   data() {
     const validateDirectSourceUrl = (rule, value, callback) => {
       if (this.form.stream_source_type === 'DIRECT' && !value) {
-        callback(new Error('DIRECT 设备类型下，视频流地址不能为空'))
+        callback(new Error('DIRECT 流来源下，视频流地址不能为空'))
         return
       }
       callback()
@@ -424,6 +466,9 @@ export default {
     handleQueryOrgChange(value) {
       this.queryParams.org_index = value === null || value === undefined || value === '' ? undefined : value
     },
+    formatDeviceType(value) {
+      return String(value || '').toLowerCase() === 'gb28181' ? 'GB28181' : 'RTSP'
+    },
     formatSourceType(value) {
       if (String(value).toUpperCase() === 'PLATFORM') {
         return '平台'
@@ -433,10 +478,26 @@ export default {
       }
       return value || '直连'
     },
-    renderOnline(value) {
-      const normalized = String(value)
-      const target = this.onlineOptions.find((item) => String(item.value) === normalized)
-      return target ? target.label : value
+    formatOnline(value) {
+      return String(value) === '1' ? '在线' : '离线'
+    },
+    formatMonitorStatus(value) {
+      const labels = {
+        RUNNING: '运行中',
+        STOPPED: '已停止',
+        STARTING: '启动中',
+        STOPPING: '停止中',
+        ERROR: '异常'
+      }
+      const status = String(value || '').toUpperCase()
+      return labels[status] || status || '未知'
+    },
+    monitorStatusType(value) {
+      const status = String(value || '').toUpperCase()
+      if (status === 'RUNNING') return 'success'
+      if (status === 'ERROR') return 'danger'
+      if (status === 'STARTING' || status === 'STOPPING') return 'warning'
+      return 'info'
     },
     generateApeId() {
       const randomPart = Math.floor(100000 + Math.random() * 900000)
@@ -474,6 +535,15 @@ export default {
         this.loading = false
       })
     },
+    async syncGbDevices() {
+      try {
+        const response = await syncGbDevicesApi()
+        this.$modal.msgSuccess((response && response.msg) || '国标设备同步完成')
+        this.getList()
+      } catch (error) {
+        this.$modal.msgError((error && error.message) || '国标设备同步失败，请稍后重试')
+      }
+    },
     cancel() {
       this.open = false
       this.reset()
@@ -482,6 +552,7 @@ export default {
       this.form = {
         ape_id: undefined,
         name: undefined,
+        device_type: 'rtsp',
         stream_source_type: 'DIRECT',
         direct_source_url: undefined,
         ip_addr: undefined,
@@ -528,6 +599,7 @@ export default {
       }
       getDevice(apeId).then((response) => {
         this.form = Object.assign({}, this.form, response.data || {})
+        this.form.device_type = this.form.device_type || 'rtsp'
         this.form.stream_source_type = (this.form.stream_source_type || 'DIRECT').toUpperCase()
         this.selectedOrgIndex = this.ensureFormOrgOption(this.form.org_index, this.form.org_name)
         this.handleFormOrgChange(this.selectedOrgIndex)
@@ -542,6 +614,7 @@ export default {
           return
         }
         this.form.stream_source_type = (this.form.stream_source_type || 'DIRECT').toUpperCase()
+        this.form.device_type = this.form.device_type || 'rtsp'
         const request = this.isEdit ? updateDevice(this.form) : addDevice(this.form)
         request.then(() => {
           this.$modal.msgSuccess(this.isEdit ? '修改成功' : '新增成功')
@@ -562,16 +635,27 @@ export default {
         this.$modal.msgSuccess('删除成功')
       }).catch(() => {})
     },
+    goToRealtime(row) {
+      const query = {}
+      if (row) {
+        const apeId = row.ape_id || row.apeId || row.deviceId || row.device_id
+        if (apeId) {
+          query.ape_id = apeId
+        }
+      }
+      this.$router.push({ path: '/video/realtime', query })
+    },
     async startMonitor(row) {
       try {
         const response = await startDeviceMonitor(row.ape_id)
         const payload = response && response.data && typeof response.data === 'object' ? response.data : {}
-        const shortMessage = payload.shortMessage || '已启动监控，请到“实时监控”菜单继续操作。'
+        const shortMessage = payload.shortMessage || '已启动监控，可点击“进入监控”或前往“实时监控”查看画面。'
         const hasSuccess = Object.prototype.hasOwnProperty.call(payload, 'success')
         this.$message({
           type: hasSuccess && !payload.success ? 'warning' : 'success',
           message: shortMessage
         })
+        this.getList()
       } catch (error) {
         this.$modal.msgError((error && error.message) || '启动监控失败，请稍后重试')
       }
@@ -587,16 +671,10 @@ export default {
           type: isFailed ? 'warning' : 'success',
           message: shortMessage
         })
+        this.getList()
       } catch (error) {
         this.$modal.msgError((error && error.message) || '停止监控失败，请稍后重试')
       }
-    },
-    extractPreviewUrl(response) {
-      if (!response) {
-        return ''
-      }
-      const data = response.data || response
-      return data.playUrl || data.previewUrl || data.url || data.streamUrl || data.rtspUrl || data.flvUrl || data.directSourceUrl || data.direct_source_url || data.liveUrl || data.live_url || ''
     },
     async handlePreview(row) {
       const apeId = row.ape_id || row.apeId || row.device_id || row.deviceId
@@ -604,14 +682,18 @@ export default {
         this.$modal.msgError('设备编码不存在，无法预览')
         return
       }
-      const response = await previewDeviceMonitor(apeId)
-      const playUrl = this.extractPreviewUrl(response)
-      if (!playUrl) {
-        this.$modal.msgWarning('暂无可播放地址，请先启动监控后重试')
-        return
+      try {
+        const response = await previewDeviceMonitor(apeId)
+        const playUrl = extractPlayableUrl(response)
+        if (!playUrl) {
+          this.$modal.msgWarning('暂无可用播放流')
+          return
+        }
+        this.rtspUrl = playUrl
+        this.viewProof = true
+      } catch (e) {
+        this.$modal.msgError('获取预览流地址失败，请稍后重试')
       }
-      this.rtspUrl = playUrl
-      this.viewProof = true
     },
     warningHistory(row) {
       this.device_id = row.ape_id || row.apeId || row.place

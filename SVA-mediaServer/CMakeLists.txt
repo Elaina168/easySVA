@@ -49,6 +49,7 @@ option(ENABLE_MEM_DEBUG "Enable Memory Debug" OFF)
 option(ENABLE_MP4 "Enable MP4" ON)
 option(ENABLE_MSVC_MT "Enable MSVC Mt/Mtd lib" ON)
 option(ENABLE_MYSQL "Enable MySQL" OFF)
+option(ENABLE_GB28181_SIGNALING "Enable the easySVA GB28181 signaling service" ON)
 option(ENABLE_OPENSSL "Enable OpenSSL" ON)
 option(ENABLE_PLAYER "Enable Player" ON)
 option(ENABLE_RTPPROXY "Enable RTPPROXY" ON)
@@ -556,6 +557,10 @@ add_subdirectory(3rdpart)
 add_subdirectory(src)
 
 add_subdirectory(ext-codec)
+
+if(ENABLE_GB28181_SIGNALING)
+  add_subdirectory(gb28181)
+endif()
 
 if(ENABLE_SRT)
   add_subdirectory(srt)
