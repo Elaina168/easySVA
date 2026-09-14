@@ -247,6 +247,9 @@ namespace SVAAnalyzer
             return false;
         }
 
+        // 每帧读取一次阈值，避免同帧过滤与 NMS 使用不同的置信度。
+        const float detectionConfidence = mDetectionConfidence.load();
+        const float nmsThreshold = mNmsThreshold.load();
         LetterboxTransform transform;
         const cv::Mat inputImage = centeredLetterbox(bgr, mInputWidth, mInputHeight, transform);
         cv::Mat blob = cv::dnn::blobFromImage(inputImage,
@@ -333,7 +336,7 @@ namespace SVAAnalyzer
         for (int prediction = 0; prediction < mPredictionCount; ++prediction)
         {
             const float confidence = valueAt(4, prediction);
-            if (!std::isfinite(confidence) || confidence < mDetectionConfidence)
+            if (!std::isfinite(confidence) || confidence < detectionConfidence)
             {
                 continue;
             }
@@ -387,8 +390,8 @@ namespace SVAAnalyzer
         std::vector<int> keptIndices;
         cv::dnn::NMSBoxes(boxes,
                           confidences,
-                          mDetectionConfidence,
-                          mNmsThreshold,
+                          detectionConfidence,
+                          nmsThreshold,
                           keptIndices);
         detects.reserve(keptIndices.size());
         for (const int keptIndex : keptIndices)

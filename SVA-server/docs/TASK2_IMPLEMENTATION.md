@@ -84,7 +84,7 @@ curl -s -X POST http://127.0.0.1:9993/api/control/add \
 [INFO] [connect:67] GB28181 source normalized for unified decoder: gb28181://127.0.0.1:9994/live/acceptance -> rtsp://127.0.0.1:9994/live/acceptance
 [INFO] [connect:163] CUDA hardware decoding ENABLED for stream: rtsp://127.0.0.1:9994/live/acceptance
 ```
-调用 `POST /api/controls` 返回任务状态为 1000（成功），`checkFps` 与 `detectFps` 稳定工作。
+调用 `POST /api/control/add` 返回任务状态为 1000（成功），`checkFps` 与 `detectFps` 稳定工作。
 
 ### 3. Web 网页端全流程验证
 1. **设备管理（`http://localhost:8080/#/device`）**：
@@ -92,7 +92,7 @@ curl -s -X POST http://127.0.0.1:9993/api/control/add \
    - 列表中清晰展示“在线状态”与“监控状态”。
    - 点击“预览视频”，播放器自动解析并实时播放视频。
 2. **实时预览工作台（`http://localhost:8080/#/device/realtime`）**：
-   - 支持 1/4/9/16 分屏切换。
+   - 支持 1/4/9 分屏切换。
    - 点击国标测试摄像头，画面流畅呈现，支持长连接稳定播放。
 3. **布控管理（`http://localhost:8080/#/deployment`）**：
    - 现有的 `acceptance-camera-yolo` 处于运行中状态，点击“预览”可查看实时检测框与告警记录。

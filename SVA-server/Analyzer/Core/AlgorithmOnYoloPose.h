@@ -5,6 +5,7 @@
 #include "PoseOutputLayout.h"
 #include <onnxruntime_cxx_api.h>
 #include <string>
+#include <atomic>
 #include <vector>
 
 namespace SVAAnalyzer
@@ -48,8 +49,8 @@ namespace SVAAnalyzer
         std::vector<int64_t> mOutputDims;
         bool mGpuEnabled = false;
         std::string mActiveProvider = "CPU";
-        float mDetectionConfidence = 0.35f;
-        float mNmsThreshold = 0.45f;
+        std::atomic<float> mDetectionConfidence{0.35f};
+        std::atomic<float> mNmsThreshold{0.45f};
         Ort::Env mEnv{nullptr};
         Ort::SessionOptions mSessionOptions{nullptr};
         Ort::Session mSession{nullptr};

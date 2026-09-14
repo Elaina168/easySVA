@@ -46,27 +46,32 @@ public class AlgorithmTuningController extends BaseController
     @Autowired
     private SvaServerMapper svaServerMapper;
 
-    /** 最近一次生效的配置（内存态，服务重启后回到标准档），保证 GET 可读回当前值 */
-    private volatile AlgorithmTuningConfig current = buildPreset("MEDIUM");
+    /** 仅保存本次后端运行期间的最近一次更新回执，不冒充引擎实时配置。 */
+    private volatile Map<String, Object> lastApplied;
+
 
     /**
-     * 查询当前生效配置 + 预设档位 + 专家滑块范围
+     * 查询编辑默认值、历史回执、预设档位及允许的参数范围
      */
     @GetMapping
     public AjaxResult current()
     {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("current", current);
+        data.put("current", null);
+        data.put("configurationState", "UNVERIFIED");
+        data.put("defaultConfig", buildPreset("MEDIUM"));
+        data.put("lastApplied", lastApplied);
+        data.put("persistence", "RUNTIME_ONLY");
         data.put("presets", buildPresetMeta());
         data.put("ranges", buildRanges());
         return AjaxResult.success(data);
     }
 
     /**
-     * 提交热加载：按档位补齐参数 -> 下发 C++ 引擎 -> 记忆当前配置
+     * 提交热加载：校验参数补丁 -> 下发 C++ 引擎 -> 保存实际更新回执
      */
     @PostMapping("/update")
-    public AjaxResult update(@RequestBody AlgorithmTuningConfig request)
+    public synchronized AjaxResult update(@RequestBody AlgorithmTuningConfig request)
     {
         if (request == null)
         {
@@ -84,7 +89,7 @@ public class AlgorithmTuningController extends BaseController
         }
         else
         {
-            merged = request;
+            merged = OBJECT_MAPPER.convertValue(request, AlgorithmTuningConfig.class);
             preset = "CUSTOM";
             if (StringUtils.isBlank(merged.getControlCode()))
             {
@@ -93,16 +98,18 @@ public class AlgorithmTuningController extends BaseController
         }
         merged.setPreset(preset);
 
-        // 2. 定位 C++ 分析引擎地址
-        SvaServer sva = svaServerMapper.selectEnabledById(DEFAULT_SVA_SERVER_ID);
-        if (sva == null || StringUtils.isBlank(sva.getHost()) || sva.getAnalyzer_port() == null)
+        // 模型阈值是全局参数。单任务预设只下发行为规则；显式提交全局值则拒绝。
+        if (!"*".equals(merged.getControlCode()))
         {
-            return AjaxResult.error("未找到可用的算法服务器(sva_server)配置");
+            if ("CUSTOM".equals(preset) && (merged.getDetectionConfidence() != null || merged.getNmsThreshold() != null))
+                return AjaxResult.error("目标检出置信度和 NMS 为共享模型参数，只能在全部布控范围修改");
+            merged.setDetectionConfidence(null);
+            merged.setNmsThreshold(null);
         }
-        String engineUrl = "http://" + sva.getHost().trim() + ":" + sva.getAnalyzer_port()
-            + "/api/control/update-algorithm-config";
+        String validationError = validate(merged);
+        if (validationError != null) return AjaxResult.error(validationError);
 
-        // 3. 组装下发参数（仅下发非空且为正的字段，C++ 侧仅在 >0 时覆盖，避免误重置）
+        // 仅下发用户提供的补丁字段，不以默认值覆盖未提交的参数。
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("controlCode", StringUtils.isBlank(merged.getControlCode()) ? "*" : merged.getControlCode());
         putPositive(payload, "detectionConfidence", merged.getDetectionConfidence());
@@ -118,7 +125,18 @@ public class AlgorithmTuningController extends BaseController
         putPositive(payload, "shoulderTiltDegMin", merged.getShoulderTiltDegMin());
         putPositiveLong(payload, "motionWindowMs", merged.getMotionWindowMs());
 
-        // 4. 下发
+        if (payload.size() == 1) return AjaxResult.error("请至少提交一个调节参数");
+
+        // 2. 定位 C++ 分析引擎地址
+        SvaServer sva = svaServerMapper.selectEnabledById(DEFAULT_SVA_SERVER_ID);
+        if (sva == null || StringUtils.isBlank(sva.getHost()) || sva.getAnalyzer_port() == null)
+        {
+            return AjaxResult.error("未找到可用的算法服务器(sva_server)配置");
+        }
+        String engineUrl = "http://" + sva.getHost().trim() + ":" + sva.getAnalyzer_port()
+            + "/api/control/update-algorithm-config";
+
+        // 下发并核验实际更新任务。
         try
         {
             HttpHeaders headers = new HttpHeaders();
@@ -140,9 +158,32 @@ public class AlgorithmTuningController extends BaseController
                 return AjaxResult.error("热加载未生效：" + (StringUtils.isBlank(msg) ? "引擎返回 code=" + code : msg));
             }
 
-            current = merged;
-            AjaxResult ok = AjaxResult.success("参数已实时热生效，当前监控流已应用最新判定标准");
-            ok.put("current", current);
+            JsonNode controls = root.path("updatedControls");
+            JsonNode global = root.path("globalThresholdsUpdated");
+            boolean expectedGlobal = payload.containsKey("detectionConfidence") || payload.containsKey("nmsThreshold");
+            if (!controls.isArray() || controls.isEmpty() || !global.isBoolean()
+                || global.asBoolean() != expectedGlobal)
+                return AjaxResult.error("引擎未提供完整生效回执，请核对引擎版本和运行布控；参数状态未确认");
+            List<String> updatedControls = new ArrayList<>();
+            for (JsonNode item : controls)
+            {
+                if (!item.isTextual() || StringUtils.isBlank(item.asText())
+                    || (!"*".equals(merged.getControlCode()) && !merged.getControlCode().equals(item.asText())))
+                    return AjaxResult.error("引擎生效任务与请求范围不一致，参数状态未确认");
+                if (!updatedControls.contains(item.asText())) updatedControls.add(item.asText());
+            }
+            Map<String, Object> receipt = new LinkedHashMap<>();
+            receipt.put("preset", preset);
+            receipt.put("parameters", new LinkedHashMap<>(payload));
+            receipt.put("updatedControls", updatedControls);
+            receipt.put("globalThresholdsUpdated", global.asBoolean());
+            receipt.put("appliedAt", java.time.Instant.now().toString());
+            lastApplied = receipt;
+            AjaxResult ok = AjaxResult.success("本次已更新 " + updatedControls.size() + " 个运行中的睡岗布控"
+                + (global.asBoolean() ? "；共享 Pose 模型阈值已更新" : "；共享模型阈值未修改"));
+            ok.put("updatedControls", updatedControls);
+            ok.put("globalThresholdsUpdated", global.asBoolean());
+            ok.put("lastApplied", receipt);
             return ok;
         }
         catch (Exception ex)
@@ -150,6 +191,25 @@ public class AlgorithmTuningController extends BaseController
             log.error("算法参数热加载下发失败, url={}", engineUrl, ex);
             return AjaxResult.error("无法连接算法分析引擎，请确认 Analyzer 已启动：" + ex.getMessage());
         }
+    }
+
+    /** 在访问引擎前校验字段，避免非法值被静默丢弃后显示成功。 */
+    private String validate(AlgorithmTuningConfig config)
+    {
+        JsonNode values = OBJECT_MAPPER.valueToTree(config);
+        Map<String, Object> ranges = buildRanges();
+        for (Map.Entry<String, Object> entry : ranges.entrySet())
+        {
+            JsonNode value = values.path(entry.getKey());
+            if (value.isMissingNode() || value.isNull()) continue;
+            Map<?, ?> range = (Map<?, ?>) entry.getValue();
+            double number = value.asDouble();
+            double min = ((Number) range.get("min")).doubleValue();
+            double max = ((Number) range.get("max")).doubleValue();
+            if (!value.isNumber() || !Double.isFinite(number) || number < min || number > max)
+                return entry.getKey() + " 超出允许范围 [" + min + ", " + max + "]";
+        }
+        return null;
     }
 
     private void putPositive(Map<String, Object> payload, String key, Double value)
@@ -215,9 +275,9 @@ public class AlgorithmTuningController extends BaseController
     private List<Map<String, Object>> buildPresetMeta()
     {
         List<Map<String, Object>> list = new ArrayList<>();
-        list.add(preset("HIGH", "高灵敏模式", "快速响应/测试演示，约3秒触发，适合答辩验收", "danger"));
-        list.add(preset("MEDIUM", "标准生产模式", "抗干扰推荐，约15秒确认，平衡误报与响应", "primary"));
-        list.add(preset("LOW", "宽松防误模式", "约30秒确认，仅抓重度趴桌，杜绝写字捡笔误报", "success"));
+        list.add(preset("HIGH", "高灵敏模式", "确认窗口3秒，实际告警取决于姿态及有效帧", "danger"));
+        list.add(preset("MEDIUM", "标准模式", "确认窗口15秒，需结合机位验证误报与漏报", "primary"));
+        list.add(preset("LOW", "长窗口模式", "确认窗口30秒，不保证消除误报", "success"));
         list.add(preset("CUSTOM", "专家自定义", "展开滑块逐项微调，适配特定机位角度", "warning"));
         return list;
     }

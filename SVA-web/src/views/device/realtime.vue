@@ -450,7 +450,7 @@
     />
 
     <!-- YOLO-Pose 算法灵敏度动态调参（热加载） -->
-    <AlgorithmConfigModal :visible.sync="showAlgoTuning" :target-device="currentDevice" />
+    <AlgorithmConfigModal :visible.sync="showAlgoTuning" />
   </div>
 </template>
 

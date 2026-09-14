@@ -1,4 +1,5 @@
 #include "Scheduler.h"
+#include "AlgorithmTuning.h"
 #include "Config.h"
 #include "Control.h"
 #include "Worker.h"
@@ -2181,54 +2182,29 @@ namespace SVAAnalyzer
                                          std::vector<std::string> &updatedControls,
                                          std::string &msg)
     {
-        // 1. Update ONNX Runtime detection thresholds if specified
-        if (scoreThreshold > 0.0f)
-        {
-            if (on_yolo11n_pose) on_yolo11n_pose->setDetectionConfidence(scoreThreshold);
-            if (on_yolo11n_80) on_yolo11n_80->setDetectionConfidence(scoreThreshold);
-        }
-        if (nmsThreshold > 0.0f)
-        {
-            if (on_yolo11n_pose) on_yolo11n_pose->setNmsThreshold(nmsThreshold);
-            if (on_yolo11n_80) on_yolo11n_80->setNmsThreshold(nmsThreshold);
-        }
-
-        // 2. Broadcast or target update to active workers
         std::lock_guard<std::mutex> lock(mWorkerMapMtx);
-        std::unordered_set<Worker *> visitedWorkers;
-        bool anyWorkerUpdated = false;
-
-        for (auto &pair : mWorkerMap)
+        // Pose 阈值属于共享模型；模型不可用时，在修改任务之前拒绝请求。
+        if ((scoreThreshold > 0 || nmsThreshold > 0) && !on_yolo11n_pose)
         {
-            Worker *worker = pair.second;
-            if (!worker || visitedWorkers.count(worker))
-            {
-                continue;
-            }
-            visitedWorkers.insert(worker);
-
-            std::string subMsg;
-            if (worker->updateAlgorithmConfig(controlCode, rule, scoreThreshold, nmsThreshold, updatedControls, subMsg))
-            {
-                anyWorkerUpdated = true;
-            }
+            updatedControls.clear();
+            msg = "pose model is unavailable";
+            return false;
         }
-
-        if (anyWorkerUpdated || !updatedControls.empty())
-        {
-            msg = "algorithm config updated";
-            return true;
-        }
-
-        // If no active worker matched but thresholds were updated globally
-        if (scoreThreshold > 0.0f || nmsThreshold > 0.0f)
-        {
-            msg = "global algorithm detection thresholds updated";
-            return true;
-        }
-
-        msg = "no matching control found to update";
-        return false;
+        return applyAlgorithmTuning(controlCode, scoreThreshold, nmsThreshold,
+            [&](std::vector<std::string> &codes) {
+                std::unordered_set<Worker *> visitedWorkers;
+                for (auto &pair : mWorkerMap)
+                {
+                    Worker *worker = pair.second;
+                    if (!worker || !visitedWorkers.insert(worker).second) continue;
+                    std::string subMsg;
+                    worker->updateAlgorithmConfig(controlCode, rule, scoreThreshold, nmsThreshold, codes, subMsg);
+                }
+            },
+            [&] {
+                if (scoreThreshold > 0) on_yolo11n_pose->setDetectionConfidence(scoreThreshold);
+                if (nmsThreshold > 0) on_yolo11n_pose->setNmsThreshold(nmsThreshold);
+            }, updatedControls, msg);
     }
 
     void Scheduler::updateTemporalTracks(const Control &control,

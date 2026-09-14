@@ -95,6 +95,11 @@ if(SVA_BUILD_POSE_SMOKE_TEST)
 endif()
 
 if(BUILD_TESTING)
+  add_executable(AlgorithmTuningUnitTest Analyzer/Tools/AlgorithmTuningUnitTest.cpp)
+  target_include_directories(AlgorithmTuningUnitTest PRIVATE Analyzer/Core)
+  target_link_libraries(AlgorithmTuningUnitTest ${OpenCV_LIBS} jsoncpp)
+  add_test(NAME AlgorithmTuningUnitTest COMMAND AlgorithmTuningUnitTest)
+
   add_executable(SleepPoseUnitTest
           Analyzer/Tools/SleepPoseUnitTest.cpp
           Analyzer/Core/SleepPoseEvaluator.cpp)

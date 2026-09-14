@@ -13,13 +13,19 @@
         type="info"
         :closable="false"
         show-icon
-        title="调整后点击「立即热加载」，参数毫秒级下发到分析引擎，当前监控流不中断、服务无需重启。"
+        title="本页修改全部运行中的睡岗布控；目标检出置信度和 NMS 作用于共享 Pose 模型，并非仅修改当前选中的摄像头。"
         style="margin-bottom: 14px;"
       />
 
+      <el-alert
+        type="warning"
+        :closable="false"
+        title="表单为待提交参数，不是引擎实时配置。热调不保存到布控配置；重启分析引擎或重新启动布控后请重新应用。后端重启仅清除下发记录，不会重置仍在运行的引擎。"
+        style="margin-bottom: 14px;"
+      />
       <!-- 预设档位 -->
       <div class="preset-title">选择灵敏度档位</div>
-      <el-radio-group v-model="preset" class="preset-group" @input="onPresetChange">
+      <el-radio-group :disabled="saving || loading" v-model="preset" class="preset-group" @input="onPresetChange">
         <el-radio
           v-for="p in presets"
           :key="p.key"
@@ -48,6 +54,7 @@
           </div>
           <el-slider
             v-model="form[field]"
+            :disabled="saving || loading"
             :min="rangeOf(field).min"
             :max="rangeOf(field).max"
             :step="rangeOf(field).step"
@@ -57,14 +64,18 @@
         </div>
       </div>
 
-      <div class="current-line" v-if="lastPreset">
-        当前已生效：<el-tag size="mini" type="success">{{ presetLabel(lastPreset) }}</el-tag>
+      <div class="current-line" v-if="lastApplied">
+        最近一次下发记录（不代表当前实时状态）：
+        <el-tag size="mini" type="info">{{ presetLabel(lastApplied.preset) }}</el-tag>
+        <div>时间：{{ lastApplied.appliedAt }}</div>
+        <div>当时更新的布控：{{ (lastApplied.updatedControls || []).join('、') }}</div>
+        <div>{{ lastApplied.globalThresholdsUpdated ? '本次同时修改了共享 Pose 模型阈值' : '本次未修改共享模型阈值' }}</div>
       </div>
     </div>
 
     <div slot="footer">
       <el-button @click="dialogVisible = false">取 消</el-button>
-      <el-button type="primary" :loading="saving" icon="el-icon-lightning" @click="apply">
+      <el-button type="primary" :loading="saving" :disabled="loading || !configLoaded" icon="el-icon-lightning" @click="apply">
         立即热加载
       </el-button>
     </div>
@@ -123,7 +134,8 @@ export default {
       loading: false,
       saving: false,
       preset: 'MEDIUM',
-      lastPreset: 'MEDIUM',
+      lastApplied: null,
+      configLoaded: false,
       form: defaultForm(),
       presets: [],
       ranges: {},
@@ -166,27 +178,24 @@ export default {
     },
     loadConfig() {
       this.loading = true
-      getAlgorithmTuningConfig().then(res => {
+      this.configLoaded = false
+      this.lastApplied = null
+      this.preset = 'MEDIUM'
+      this.form = defaultForm()
+      return getAlgorithmTuningConfig().then(res => {
         const data = res.data || {}
         this.presets = data.presets || []
         this.ranges = data.ranges || {}
-        const cur = data.current || {}
-        if (cur.preset) {
-          this.preset = cur.preset
-          this.lastPreset = cur.preset
-        }
-        // 用后端当前值回填表单
+        // 只使用明确标识的编辑默认值，绝不将历史下发记录当作实时状态。
+        const defaults = data.defaultConfig || {}
+        if (defaults.preset) this.preset = defaults.preset
         Object.keys(this.form).forEach(k => {
-          if (cur[k] !== null && cur[k] !== undefined) this.form[k] = cur[k]
+          if (defaults[k] !== null && defaults[k] !== undefined) this.form[k] = defaults[k]
         })
+        this.lastApplied = data.lastApplied || null
+        this.configLoaded = true
       }).catch(() => {
-        // 接口异常时使用内置兜底
-        this.presets = this.presets.length ? this.presets : [
-          { key: 'HIGH', label: '高灵敏模式', desc: '约3秒触发，适合答辩演示', tagType: 'danger' },
-          { key: 'MEDIUM', label: '标准生产模式', desc: '约15秒确认，推荐', tagType: 'primary' },
-          { key: 'LOW', label: '宽松防误模式', desc: '约30秒确认，杜绝误报', tagType: 'success' },
-          { key: 'CUSTOM', label: '专家自定义', desc: '逐项微调', tagType: 'warning' }
-        ]
+        this.$modal.msgError('调参配置加载失败，请关闭后重试')
       }).finally(() => { this.loading = false })
     },
     onPresetChange(key) {
@@ -197,14 +206,13 @@ export default {
       }
     },
     apply() {
+      if (this.saving || this.loading || !this.configLoaded) return
       this.saving = true
       const payload = Object.assign({ controlCode: '*', preset: this.preset }, this.form)
-      updateAlgorithmTuning(payload).then(res => {
-        this.lastPreset = this.preset
-        const cur = res && res.current ? res.current : null
-        if (cur && cur.preset) this.lastPreset = cur.preset
-        this.$modal.msgSuccess(res.msg || '参数已实时热生效')
-        this.$emit('applied', cur || payload)
+      return updateAlgorithmTuning(payload).then(res => {
+        this.lastApplied = res.lastApplied || null
+        this.$modal.msgSuccess(res.msg)
+        this.$emit('applied', this.lastApplied)
         this.dialogVisible = false
       }).catch(err => {
         this.$modal.msgError((err && err.message) || '热加载失败，请确认分析引擎已启动')
