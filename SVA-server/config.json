@@ -7,7 +7,7 @@
   "mediaHttpPort": 9992,
   "analyzerPort": 9993,
   "mediaRtspPort": 9994,
-  "mediaSecret": "V3522025zlm0aA9ajn7UiOWi",
+  "mediaSecret": "CHANGE_ME_ZLM_SECRET",
   "uploadDir": "/var/www/SVA-web/upload",
   "modelDir": "/opt/SVA-dev/models",
   "saveAlarmType": 1,

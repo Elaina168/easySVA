@@ -8,8 +8,8 @@
 # ============================================================
 
 INTERVAL=2
-ZLM_SECRET="V3522025zlm0aA9ajn7UiOWi"
-DB_USER="root"; DB_PASS="easySVA.EZ"; DB_NAME="easySVA"
+ZLM_SECRET="CHANGE_ME_ZLM_SECRET"
+DB_USER="root"; DB_PASS="CHANGE_ME_DB_PASSWORD"; DB_NAME="easySVA"
 
 R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; C=$'\033[36m'; B=$'\033[1m'; D=$'\033[2m'; N=$'\033[0m'
 

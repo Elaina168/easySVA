@@ -371,7 +371,7 @@ public class AiReviewServiceImpl implements IAiReviewService
         Map<String, Object> imagePart = new HashMap<>();
         imagePart.put("type", "image_url");
         Map<String, Object> imageUrl = new HashMap<>();
-        imageUrl.put("url", task.getMediaUrl());
+        imageUrl.put("url", buildInlineImageDataUrl(task.getMediaUrl(), null));
         imagePart.put("image_url", imageUrl);
         content.add(imagePart);
 
@@ -395,7 +395,7 @@ public class AiReviewServiceImpl implements IAiReviewService
 
         List<Map<String, Object>> userContent = new ArrayList<>();
         Map<String, Object> imagePart = new LinkedHashMap<>();
-        imagePart.put("image", buildAliyunImageDataUrl(task.getMediaUrl(), server.getTimeoutMs()));
+        imagePart.put("image", buildInlineImageDataUrl(task.getMediaUrl(), server.getTimeoutMs()));
         userContent.add(imagePart);
         Map<String, Object> textPart = new LinkedHashMap<>();
         textPart.put("text", buildReviewPrompt(waring, task));
@@ -408,7 +408,7 @@ public class AiReviewServiceImpl implements IAiReviewService
         return messages;
     }
 
-    private String buildAliyunImageDataUrl(String mediaUrl, Integer timeoutMs)
+    private String buildInlineImageDataUrl(String mediaUrl, Integer timeoutMs)
     {
         String source = StringUtils.trimToEmpty(mediaUrl);
         if (StringUtils.isEmpty(source))
@@ -433,6 +433,11 @@ public class AiReviewServiceImpl implements IAiReviewService
     {
         if (isHttpUrl(source))
         {
+            ImagePayload localPayload = tryLoadLocalImagePayload(source);
+            if (localPayload != null)
+            {
+                return localPayload;
+            }
             try
             {
                 return downloadImagePayload(source, timeoutMs);

@@ -31,7 +31,7 @@ DEVICES = [
     }
 ]
 
-ZLM_API = "http://127.0.0.1:9992/index/api/getMediaList?secret=V3522025zlm0aA9ajn7UiOWi&app=rtp"
+ZLM_API = "http://127.0.0.1:9992/index/api/getMediaList?secret=CHANGE_ME_ZLM_SECRET&app=rtp"
 GBSIP_DEVICES = "http://127.0.0.1:18080/gb28181/api/devices"
 GBSIP_SESSIONS = "http://127.0.0.1:18080/gb28181/api/sessions"
 GBSIP_START = "http://127.0.0.1:18080/gb28181/api/live/start"

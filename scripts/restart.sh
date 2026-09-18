@@ -42,7 +42,7 @@ cd /opt/SVA-dev/mediaServer
 nohup ./MediaServer -d > /opt/SVA-dev/mediaServer/zlm_boot.log 2>&1 &
 
 for i in $(seq 1 20); do
-  if curl -s --max-time 2 "http://127.0.0.1:9992/index/api/getServerConfig?secret=V3522025zlm0aA9ajn7UiOWi" >/dev/null 2>&1; then
+  if curl -s --max-time 2 "http://127.0.0.1:9992/index/api/getServerConfig?secret=CHANGE_ME_ZLM_SECRET" >/dev/null 2>&1; then
     echo "  -> MediaServer 已就绪 (端口 9992/9994/9995)"
     break
   fi
@@ -52,7 +52,7 @@ done
 # 3. 启动 GbSipServer (国标 SIP 信令服务)
 echo "[3/7] 启动 GbSipServer..."
 cd /opt/SVA-dev/SVA-backend/SVA-mediaServer/release/linux/Release
-export EASY_SVA_ZLM_API_SECRET=V3522025zlm0aA9ajn7UiOWi
+export EASY_SVA_ZLM_API_SECRET=CHANGE_ME_ZLM_SECRET
 nohup ./GbSipServer > /opt/SVA-dev/mediaServer/gbsip.log 2>&1 &
 
 for i in $(seq 1 20); do

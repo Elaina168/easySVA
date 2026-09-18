@@ -11,6 +11,8 @@ import com.ruoyi.waring.mapper.HDeviceMapper;
 import com.ruoyi.waring.mapper.SvaServerMapper;
 import com.ruoyi.waring.mapper.ZlmServerMapper;
 import com.ruoyi.waring.service.HAlgorithmService;
+import com.ruoyi.waring.service.PublicMediaUrl;
+import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +43,9 @@ public class DeploymentAnalyzerClient
     private static final String DEFAULT_ZLM_APP = "live";
     private static final String DEFAULT_SVA_APP = "analyzer";
     private static final int DEFAULT_ALARM_INTERVAL_SEC = 180;
+
+    @Value("${easysva.public-base-url:}")
+    private String publicBaseUrl;
 
     @Autowired
     private RestTemplate restTemplate;
@@ -545,8 +550,9 @@ public class DeploymentAnalyzerClient
         {
             return null;
         }
-        return "ws://" + config.zlmHost + ":" + config.zlmMediaHttpPort + "/" + config.svaApp + "/"
-            + deploymentId + ".live.flv";
+        return PublicMediaUrl.resolve(publicBaseUrl,
+            "ws://" + config.zlmHost + ":" + config.zlmMediaHttpPort + "/" + config.svaApp + "/"
+                + deploymentId + ".live.flv");
     }
 
     private String maskSensitiveUrl(String url)

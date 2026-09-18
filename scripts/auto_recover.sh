@@ -3,7 +3,7 @@
 LOG=/opt/SVA-dev/auto_recover.log
 API="http://127.0.0.1:9114"
 ZLM="http://127.0.0.1:9992"
-SECRET="V3522025zlm0aA9ajn7UiOWi"
+SECRET="CHANGE_ME_ZLM_SECRET"
 
 log(){ echo "$(date '+%F %T') $*" >> $LOG; }
 
@@ -31,7 +31,7 @@ for i in $(seq 1 20); do
 done
 
 # 3. 重建所有 DIRECT 设备代理流(幂等, ZLM 重启后代理丢失需重建)
-mysql -uroot -peasySVA.EZ easySVA -N -e "SELECT ape_id,direct_source_url FROM h_device WHERE stream_source_type='DIRECT' AND direct_source_url IS NOT NULL AND direct_source_url!='';" 2>/dev/null | while read ID URL; do
+mysql -uroot -pCHANGE_ME_DB_PASSWORD easySVA -N -e "SELECT ape_id,direct_source_url FROM h_device WHERE stream_source_type='DIRECT' AND direct_source_url IS NOT NULL AND direct_source_url!='';" 2>/dev/null | while read ID URL; do
   [ -z "$ID" ] && continue
   ENCURL=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$URL")
   RES=$(curl -s --max-time 8 "$ZLM/index/api/addStreamProxy?secret=$SECRET&vhost=__defaultVhost__&app=live&stream=$ID&url=$ENCURL&enable_rtsp=1&enable_rtmp=1&enable_hls=1&enable_mp4=0")

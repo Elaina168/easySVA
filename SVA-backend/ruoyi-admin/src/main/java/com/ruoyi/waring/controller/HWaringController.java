@@ -94,6 +94,9 @@ public class HWaringController extends BaseController implements SvaDetectEventC
     private static final String SVA_SLEEP_ALARM_TYPE = "SVA_SLEEP";
     private static final String SVA_SLEEP_ALARM_TYPE_NAME = "睡岗告警";
 
+    @Value("${easysva.public-base-url:}")
+    private String publicBaseUrl;
+
     @Autowired
     private RestTemplate restTemplate;
     @Resource
@@ -908,7 +911,7 @@ public class HWaringController extends BaseController implements SvaDetectEventC
         if (!normalizedHost.startsWith("http://") && !normalizedHost.startsWith("https://")) {
             normalizedHost = "http://" + normalizedHost;
         }
-        return normalizedHost + "/" + relativePath;
+        return PublicMediaUrl.resolve(publicBaseUrl, normalizedHost + "/" + relativePath);
     }
 
     private void requestZlmRecordTask(HWaring waring, DeploymentTask deploymentTask, HDevice device) {

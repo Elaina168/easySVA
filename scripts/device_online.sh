@@ -81,6 +81,6 @@ fi
 
 echo "=================================================="
 echo ">> 数据库中所有国标设备当前状态如下："
-mysql -uroot -peasySVA.EZ easySVA -e "SELECT name AS '设备名称', gb_device_id AS '国标编码', port AS '端口', CASE is_online WHEN '1' THEN '在线 (1)' WHEN '0' THEN '离线 (0)' ELSE is_online END AS '在线状态', last_keepalive_at AS '最近心跳' FROM h_device WHERE device_type='gb28181';" 2>/dev/null || true
+mysql -uroot -pCHANGE_ME_DB_PASSWORD easySVA -e "SELECT name AS '设备名称', gb_device_id AS '国标编码', port AS '端口', CASE is_online WHEN '1' THEN '在线 (1)' WHEN '0' THEN '离线 (0)' ELSE is_online END AS '在线状态', last_keepalive_at AS '最近心跳' FROM h_device WHERE device_type='gb28181';" 2>/dev/null || true
 echo "=================================================="
 echo "提示: 可在前端「设备管理」页面点击【同步国标设备】或按 F5 刷新查看状态"

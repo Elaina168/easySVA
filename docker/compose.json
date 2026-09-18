@@ -1,0 +1,209 @@
+{
+  "name": "easysva-cloud",
+  "services": {
+    "mysql": {
+      "image": "mariadb:10.6",
+      "environment": {
+        "MARIADB_ROOT_PASSWORD": "${MYSQL_PASSWORD}",
+        "MARIADB_DATABASE": "easySVA"
+      },
+      "command": "--character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci --lower_case_table_names=0",
+      "volumes": [
+        "mysql-data:/var/lib/mysql",
+        "./build/mysql-init:/docker-entrypoint-initdb.d:ro"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "mariadb-admin ping -uroot -p\"$$MARIADB_ROOT_PASSWORD\" --silent"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 30
+      },
+      "restart": "unless-stopped",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    },
+    "redis": {
+      "image": "redis:7-alpine",
+      "command": "redis-server --databases 16",
+      "volumes": [
+        "redis-data:/data"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 20
+      },
+      "restart": "unless-stopped",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    },
+    "media": {
+      "build": {
+        "context": "./build/media"
+      },
+      "image": "easysva-media:cloud-20c34c4",
+      "environment": {
+        "ZLM_SECRET": "${ZLM_SECRET}",
+        "EASY_SVA_GB_API_SECRET": "${ZLM_SECRET}",
+        "DEVICE_PASSWORD": "${DEVICE_PASSWORD}",
+        "SIP_ADVERTISED_IP": "media",
+        "ENABLE_BRIDGE": "1"
+      },
+      "volumes": [
+        "sva-upload:/opt/media/upload"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "python3 -c \"import socket;socket.create_connection(('127.0.0.1',9992),2).close()\""
+        ],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 30
+      },
+      "restart": "unless-stopped",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    },
+    "analyzer": {
+      "build": {
+        "context": "./build/analyzer"
+      },
+      "image": "easysva-analyzer:cloud-20c34c4",
+      "environment": {
+        "BACKEND_HOST": "backend",
+        "ZLM_SECRET": "${ZLM_SECRET}",
+        "BIND_HOST": "0.0.0.0"
+      },
+      "volumes": [
+        "sva-upload:/app/upload"
+      ],
+      "depends_on": {
+        "media": {
+          "condition": "service_healthy"
+        }
+      },
+      "restart": "unless-stopped",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    },
+    "backend": {
+      "build": {
+        "context": "./build/backend"
+      },
+      "image": "easysva-backend:cloud-20c34c4",
+      "environment": {
+        "MYSQL_HOST": "mysql",
+        "MYSQL_PASSWORD": "${MYSQL_PASSWORD}",
+        "MYSQL_DB": "easySVA",
+        "REDIS_HOST": "redis",
+        "EASYSVA_PUBLIC_BASE_URL": "${PUBLIC_BASE_URL}",
+        "GB28181_API_SECRET": "${ZLM_SECRET}",
+        "AI_REVIEW_ENABLED": "false",
+        "TZ": "Asia/Shanghai"
+      },
+      "volumes": [
+        "sva-upload:/home/ruoyi/uploadPath:ro"
+      ],
+      "depends_on": {
+        "mysql": {
+          "condition": "service_healthy"
+        },
+        "redis": {
+          "condition": "service_healthy"
+        },
+        "media": {
+          "condition": "service_healthy"
+        }
+      },
+      "restart": "unless-stopped",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    },
+    "web": {
+      "build": {
+        "context": "./build/web"
+      },
+      "image": "easysva-web:cloud-20c34c4",
+      "ports": [
+        "${WEB_BIND:-127.0.0.1}:80:80"
+      ],
+      "volumes": [
+        "sva-upload:/usr/share/nginx/upload:ro"
+      ],
+      "depends_on": [
+        "backend",
+        "media"
+      ],
+      "restart": "unless-stopped",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    },
+    "simulator": {
+      "build": {
+        "context": "./build/simulator"
+      },
+      "image": "easysva-simulator:cloud-20c34c4",
+      "environment": {
+        "PLATFORM_HOST": "media",
+        "DEVICE_PASSWORD": "${DEVICE_PASSWORD}"
+      },
+      "depends_on": {
+        "media": {
+          "condition": "service_healthy"
+        }
+      },
+      "restart": "unless-stopped",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+    }
+  },
+  "volumes": {
+    "mysql-data": {},
+    "redis-data": {},
+    "sva-upload": {}
+  }
+}

@@ -18,10 +18,14 @@ import com.ruoyi.waring.domain.ZlmServer;
 import com.ruoyi.waring.mapper.HDeviceMapper;
 import com.ruoyi.waring.mapper.ZlmServerMapper;
 import com.ruoyi.waring.service.HDeviceService;
+import com.ruoyi.waring.service.PublicMediaUrl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.dao.DuplicateKeyException;
@@ -66,6 +70,9 @@ public class HDeviceServiceImpl implements HDeviceService {
     private static final String DEFAULT_ZLM_APP = "live";
     private static final int DIRECT_PROXY_MEDIA_TIMEOUT_MS = 60000;
 
+    @Value("${easysva.public-base-url:}")
+    private String publicBaseUrl;
+
     @Autowired
     HDeviceMapper hDeviceMapper;
 
@@ -83,6 +90,9 @@ public class HDeviceServiceImpl implements HDeviceService {
 
     @Value("${gb28181.api-port:0}")
     private Integer gbApiPort;
+
+    @Value("${gb28181.api-secret:}")
+    private String gbApiSecret;
 
     @Value("${gb28181.platform-id:}")
     private String gbPlatformId;
@@ -296,7 +306,8 @@ public class HDeviceServiceImpl implements HDeviceService {
         Map<String, Object> result = new HashMap<>();
         result.put("apeId", apeId);
         result.put("stream", stream);
-        result.put("playUrl", "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/" + zlmApp + "/" + stream + ".live.flv");
+        result.put("playUrl", PublicMediaUrl.resolve(publicBaseUrl,
+            "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/" + zlmApp + "/" + stream + ".live.flv"));
         result.put("zlmProxyKey", StringUtils.isBlank(zlmProxyKey) ? null : zlmProxyKey);
         result.put("addProxySuccess", addProxySuccess);
         result.put("addProxyAlreadyExists", addProxyAlreadyExists);
@@ -578,7 +589,8 @@ public class HDeviceServiceImpl implements HDeviceService {
         if ("gb28181".equalsIgnoreCase(device.getDevice_type())) {
             ZlmServer zlmServer = resolveEnabledZlmServer(device);
             if (zlmServer != null && zlmServer.getMedia_http_port() != null) {
-                previewPlayUrl = "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/live/" + device.getApe_id() + ".live.flv";
+                previewPlayUrl = PublicMediaUrl.resolve(publicBaseUrl,
+                    "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/live/" + device.getApe_id() + ".live.flv");
             }
         }
         if (StringUtils.isBlank(previewPlayUrl)) {
@@ -688,7 +700,8 @@ public class HDeviceServiceImpl implements HDeviceService {
 
         String zlmApp = StringUtils.isBlank(zlmServer.getApp()) ? DEFAULT_ZLM_APP : zlmServer.getApp().trim();
         String stream = sanitizeStreamName(device.getApe_id());
-        return "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/" + zlmApp + "/" + stream + ".live.flv";
+        return PublicMediaUrl.resolve(publicBaseUrl,
+            "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/" + zlmApp + "/" + stream + ".live.flv");
     }
 
     private String browserMediaHost(String host) {
@@ -911,6 +924,15 @@ public class HDeviceServiceImpl implements HDeviceService {
      * 活跃会话：GET /gb28181/api/sessions（按 device_id 匹配 streaming 会话的 stream_id，用于生成 play_url）
      * 控制 API 端口和平台 ID 使用 gb28181 配置，与 ZLM 同机部署，host 复用 zlmServer.host。
      */
+    private ResponseEntity<String> getGbApi(String url) {
+        if (StringUtils.isBlank(gbApiSecret)) {
+            return restTemplate.getForEntity(url, String.class);
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(gbApiSecret);
+        return restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+    }
+
     private List<GbDeviceDTO> fetchGbDevicesFromZlm(ZlmServer zlmServer) {
         List<GbDeviceDTO> devices = new ArrayList<>();
         if (zlmServer == null || StringUtils.isBlank(zlmServer.getHost())) {
@@ -928,7 +950,7 @@ public class HDeviceServiceImpl implements HDeviceService {
         String base = "http://" + zlmServer.getHost() + ":" + gbApiPort + "/gb28181/api";
         try {
             // 1. 拉取注册设备列表
-            ResponseEntity<String> devResp = restTemplate.getForEntity(base + "/devices", String.class);
+            ResponseEntity<String> devResp = getGbApi(base + "/devices");
             if (devResp.getBody() == null) {
                 log.warn("[GB28181] GB 控制 API /devices 响应为空，跳过本次同步");
                 return null;
@@ -946,7 +968,7 @@ public class HDeviceServiceImpl implements HDeviceService {
             // 2. 拉取活跃会话，构建 device_id -> stream_id 映射（仅 streaming 状态用于生成 play_url）
             Map<String, String> deviceStreamMap = new HashMap<>();
             try {
-                ResponseEntity<String> sessResp = restTemplate.getForEntity(base + "/sessions", String.class);
+                ResponseEntity<String> sessResp = getGbApi(base + "/sessions");
                 if (sessResp.getBody() != null) {
                     JsonNode sessRoot = OBJECT_MAPPER.readTree(sessResp.getBody());
                     if (sessRoot.path("code").asInt() == 0 && sessRoot.path("data").isArray()) {
@@ -993,7 +1015,8 @@ public class HDeviceServiceImpl implements HDeviceService {
                 String streamId = deviceStreamMap.get(deviceId);
                 if (StringUtils.isNotBlank(streamId) && httpPort != null && httpPort > 0) {
                     dto.setStreamId(streamId);
-                    dto.setPlayUrl("ws://" + browserMediaHost(zlmServer.getHost()) + ":" + httpPort + "/rtp/" + streamId + ".live.flv");
+                    dto.setPlayUrl(PublicMediaUrl.resolve(publicBaseUrl,
+                        "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + httpPort + "/rtp/" + streamId + ".live.flv"));
                 }
                 devices.add(dto);
             }

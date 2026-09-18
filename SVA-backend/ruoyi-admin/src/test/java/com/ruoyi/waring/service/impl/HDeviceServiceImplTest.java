@@ -140,7 +140,7 @@ class HDeviceServiceImplTest
     }
 
     @Test
-    void gbPreviewWithoutPlayUrlDoesNotBuildRtspFallback()
+    void gbPreviewWithoutStoredPlayUrlBuildsConfiguredMediaUrl()
     {
         HDevice device = new HDevice();
         device.setApe_id("gb-1");
@@ -151,12 +151,13 @@ class HDeviceServiceImplTest
         device.setPlay_url(null);
         device.setMonitor_status("STOPPED");
         when(hDeviceMapper.selectDeviceByApeId("gb-1")).thenReturn(device);
+        when(zlmServerMapper.selectEnabledById(1L))
+            .thenReturn(zlmServer(1L, "10.0.0.8", 9992));
 
         Map<String, Object> result = service.previewMonitor("gb-1");
 
         assertNotNull(result);
-        assertEquals("", result.get("playUrl"));
-        verifyNoInteractions(zlmServerMapper);
+        assertEquals("ws://10.0.0.8:9992/live/gb-1.live.flv", result.get("playUrl"));
     }
 
     @Test

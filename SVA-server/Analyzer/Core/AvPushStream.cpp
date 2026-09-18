@@ -45,12 +45,25 @@ namespace SVAAnalyzer
             return false;
         }
 
-        // 修改点1：先尝试硬件编码器，再回退到软件
-        const AVCodec *videoCodec = avcodec_find_encoder_by_name("h264_nvenc");
-        if (!videoCodec)
+        // 根据任务配置选择编码器；auto 优先 NVENC，无可用 GPU 时回退到 libx264。
+        const std::string requestedEncoder = control->pushEncoder.empty() ? "auto" : control->pushEncoder;
+        const AVCodec *videoCodec = nullptr;
+        if (requestedEncoder == "libx264")
+        {
+            videoCodec = avcodec_find_encoder_by_name("libx264");
+        }
+        else
+        {
+            videoCodec = avcodec_find_encoder_by_name("h264_nvenc");
+        }
+        if (!videoCodec && requestedEncoder != "h264_nvenc")
         {
             LOGI("h264_nvenc not found, falling back to software H.264 encoder");
-            videoCodec = avcodec_find_encoder(AV_CODEC_ID_H264);
+            videoCodec = avcodec_find_encoder_by_name("libx264");
+            if (!videoCodec)
+            {
+                videoCodec = avcodec_find_encoder(AV_CODEC_ID_H264);
+            }
             if (!videoCodec)
             {
                 LOGI("avcodec_find_encoder error: pushStreamUrl=%s", pushStreamUrl.data());
@@ -163,8 +176,54 @@ namespace SVAAnalyzer
 
         if (avcodec_open2(mVideoCodecCtx, videoCodec, &video_codec_options) < 0)
         {
-            LOGI("avcodec_open2 error: pushStreamUrl=%s", pushStreamUrl.data());
-            return false;
+            if (strcmp(videoCodec->name, "h264_nvenc") != 0)
+            {
+                LOGI("avcodec_open2 error: requestedEncoder=%s pushStreamUrl=%s",
+                     requestedEncoder.c_str(), pushStreamUrl.data());
+                return false;
+            }
+
+            LOGI("NVENC open failed, falling back to software H.264");
+            avcodec_free_context(&mVideoCodecCtx);
+            av_dict_free(&video_codec_options);
+            videoCodec = avcodec_find_encoder_by_name("libx264");
+            if (!videoCodec)
+            {
+                videoCodec = avcodec_find_encoder(AV_CODEC_ID_H264);
+            }
+            if (!videoCodec)
+            {
+                LOGI("avcodec_find_encoder error: pushStreamUrl=%s", pushStreamUrl.data());
+                return false;
+            }
+
+            mVideoCodecCtx = avcodec_alloc_context3(videoCodec);
+            if (!mVideoCodecCtx)
+            {
+                LOGI("avcodec_alloc_context3 error: pushStreamUrl=%s", pushStreamUrl.data());
+                return false;
+            }
+            mVideoCodecCtx->flags |= AV_CODEC_FLAG_QSCALE | AV_CODEC_FLAG_GLOBAL_HEADER;
+            mVideoCodecCtx->rc_min_rate = bit_rate;
+            mVideoCodecCtx->rc_max_rate = bit_rate;
+            mVideoCodecCtx->bit_rate = bit_rate;
+            mVideoCodecCtx->bit_rate_tolerance = bit_rate / 2;
+            mVideoCodecCtx->codec_id = videoCodec->id;
+            mVideoCodecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
+            mVideoCodecCtx->codec_type = AVMEDIA_TYPE_VIDEO;
+            mVideoCodecCtx->width = videoWidth;
+            mVideoCodecCtx->height = videoHeight;
+            mVideoCodecCtx->time_base = {1, videoFps};
+            mVideoCodecCtx->gop_size = 25;
+            mVideoCodecCtx->max_b_frames = 0;
+            mVideoCodecCtx->thread_count = 5;
+            av_dict_set(&video_codec_options, "preset", "superfast", 0);
+            av_dict_set(&video_codec_options, "tune", "zerolatency", 0);
+            if (avcodec_open2(mVideoCodecCtx, videoCodec, &video_codec_options) < 0)
+            {
+                LOGI("avcodec_open2 error: requestedEncoder=libx264 pushStreamUrl=%s", pushStreamUrl.data());
+                return false;
+            }
         }
         mVideoStream = avformat_new_stream(mFmtCtx, videoCodec);
         if (!mVideoStream)
