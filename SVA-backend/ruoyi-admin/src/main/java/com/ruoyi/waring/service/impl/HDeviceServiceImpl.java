@@ -278,41 +278,61 @@ public class HDeviceServiceImpl implements HDeviceService {
                 log.debug("调用ZLM addStreamProxy, apeId={}, url={}", apeId, maskSensitiveUrl(addProxyUrl));
             }
 
-        ResponseEntity<String> response = restTemplate.getForEntity(addProxyUrl, String.class);
-        String body = response.getBody();
-        if (StringUtils.isBlank(body)) {
-            throw new ServiceException("调用 ZLM addStreamProxy 失败: empty response");
-        }
-
-        int code;
-        String msg;
-        String zlmProxyKey;
         try {
-            JsonNode root = OBJECT_MAPPER.readTree(body);
-            code = parseCode(root.path("code").asText());
-            msg = root.path("msg").asText("");
-            zlmProxyKey = root.path("data").path("key").asText("");
+            ResponseEntity<String> response = restTemplate.getForEntity(addProxyUrl, String.class);
+            String body = response.getBody();
+            if (StringUtils.isBlank(body)) {
+                throw new ServiceException("调用 ZLM addStreamProxy 失败: empty response");
+            }
+
+            int code;
+            String msg;
+            String zlmProxyKey;
+            try {
+                JsonNode root = OBJECT_MAPPER.readTree(body);
+                code = parseCode(root.path("code").asText());
+                msg = root.path("msg").asText("");
+                zlmProxyKey = root.path("data").path("key").asText("");
+            } catch (Exception e) {
+                throw new ServiceException("调用 ZLM addStreamProxy 失败: 响应解析异常");
+            }
+
+            boolean addProxySuccess = code == 0;
+            boolean addProxyAlreadyExists = code != 0 && isAddProxyAlreadyExists(msg);
+
+            if (!addProxySuccess && !addProxyAlreadyExists) {
+                throw new ServiceException("调用 ZLM addStreamProxy 失败: " + msg);
+            }
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("apeId", apeId);
+            result.put("stream", stream);
+            result.put("playUrl", PublicMediaUrl.resolve(publicBaseUrl,
+                "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/" + zlmApp + "/" + stream + ".live.flv"));
+            result.put("zlmProxyKey", StringUtils.isBlank(zlmProxyKey) ? null : zlmProxyKey);
+            result.put("addProxySuccess", addProxySuccess);
+            result.put("addProxyAlreadyExists", addProxyAlreadyExists);
+            result.put("protocol", "ws-flv");
+            updateDirectOnlineState(apeId, true);
+            return result;
+        } catch (RuntimeException e) {
+            updateDirectOnlineState(apeId, false);
+            throw e;
+        }
+    }
+
+    /**
+     * RTSP 直连设备没有 GB28181 注册心跳，以 ZLM 拉流代理的创建结果维护在线状态。
+     */
+    private void updateDirectOnlineState(String apeId, boolean online) {
+        HDevice statusUpdate = new HDevice();
+        statusUpdate.setApe_id(apeId);
+        statusUpdate.setIs_online(online ? "1" : "0");
+        try {
+            hDeviceMapper.updateDevice(statusUpdate);
         } catch (Exception e) {
-            throw new ServiceException("调用 ZLM addStreamProxy 失败: 响应解析异常");
+            log.warn("更新RTSP直连设备在线状态失败, apeId={}, online={}", apeId, online, e);
         }
-
-        boolean addProxySuccess = code == 0;
-        boolean addProxyAlreadyExists = code != 0 && isAddProxyAlreadyExists(msg);
-
-        if (!addProxySuccess && !addProxyAlreadyExists) {
-            throw new ServiceException("调用 ZLM addStreamProxy 失败: " + msg);
-        }
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("apeId", apeId);
-        result.put("stream", stream);
-        result.put("playUrl", PublicMediaUrl.resolve(publicBaseUrl,
-            "ws://" + browserMediaHost(zlmServer.getHost()) + ":" + zlmServer.getMedia_http_port() + "/" + zlmApp + "/" + stream + ".live.flv"));
-        result.put("zlmProxyKey", StringUtils.isBlank(zlmProxyKey) ? null : zlmProxyKey);
-        result.put("addProxySuccess", addProxySuccess);
-        result.put("addProxyAlreadyExists", addProxyAlreadyExists);
-        result.put("protocol", "ws-flv");
-        return result;
     }
 
     @Override

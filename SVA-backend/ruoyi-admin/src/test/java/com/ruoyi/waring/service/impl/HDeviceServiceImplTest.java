@@ -180,6 +180,70 @@ class HDeviceServiceImplTest
         assertFalse(result.containsKey("previewAddProxyUrl"));
     }
 
+    @Test
+    void rtspStartMarksDeviceOnlineAfterProxyStarts()
+    {
+        HDevice device = directRtspDevice("cam-1");
+        when(hDeviceMapper.selectDeviceByApeId("cam-1")).thenReturn(device);
+        when(zlmServerMapper.selectEnabledById(1L)).thenReturn(zlmServer(1L, "media", 9992));
+        when(restTemplate.getForEntity(any(String.class), eq(String.class)))
+            .thenReturn(ok("{\"code\":0,\"data\":{\"key\":\"__defaultVhost__/live/cam-1\"}}"));
+        when(hDeviceMapper.updateMonitorStateByApeId("cam-1", "RUNNING")).thenReturn(1);
+
+        assertEquals(1, service.startMonitor("cam-1"));
+
+        ArgumentCaptor<HDevice> captor = ArgumentCaptor.forClass(HDevice.class);
+        verify(hDeviceMapper).updateDevice(captor.capture());
+        assertEquals("cam-1", captor.getValue().getApe_id());
+        assertEquals("1", captor.getValue().getIs_online());
+    }
+
+    @Test
+    void rtspStartMarksDeviceOfflineWhenProxyFails()
+    {
+        HDevice device = directRtspDevice("cam-1");
+        when(hDeviceMapper.selectDeviceByApeId("cam-1")).thenReturn(device);
+        when(zlmServerMapper.selectEnabledById(1L)).thenReturn(zlmServer(1L, "media", 9992));
+        when(restTemplate.getForEntity(any(String.class), eq(String.class)))
+            .thenReturn(ok("{\"code\":-1,\"msg\":\"source unavailable\"}"));
+
+        ServiceException error = assertThrows(ServiceException.class, () -> service.startMonitor("cam-1"));
+
+        assertTrue(error.getMessage().contains("source unavailable"));
+        ArgumentCaptor<HDevice> captor = ArgumentCaptor.forClass(HDevice.class);
+        verify(hDeviceMapper).updateDevice(captor.capture());
+        assertEquals("cam-1", captor.getValue().getApe_id());
+        assertEquals("0", captor.getValue().getIs_online());
+        verify(hDeviceMapper, never()).updateMonitorStateByApeId("cam-1", "RUNNING");
+    }
+
+    @Test
+    void gbStartDoesNotOverrideHeartbeatOnlineState()
+    {
+        HDevice device = new HDevice();
+        device.setApe_id("gb-1");
+        device.setDevice_type("gb28181");
+        device.setStream_source_type("DIRECT");
+        when(hDeviceMapper.selectDeviceByApeId("gb-1")).thenReturn(device);
+        when(hDeviceMapper.updateMonitorStateByApeId("gb-1", "RUNNING")).thenReturn(1);
+
+        assertEquals(1, service.startMonitor("gb-1"));
+
+        verify(hDeviceMapper, never()).updateDevice(any(HDevice.class));
+    }
+
+    private HDevice directRtspDevice(String apeId)
+    {
+        HDevice device = new HDevice();
+        device.setApe_id(apeId);
+        device.setName("RTSP camera");
+        device.setDevice_type("rtsp");
+        device.setStream_source_type("DIRECT");
+        device.setDirect_source_url("rtsp://camera.example/live/main");
+        device.setZlm_server_id(1L);
+        return device;
+    }
+
     private void setConfigurationField(String fieldName, Object value)
     {
         ReflectionTestUtils.setField(service, fieldName, value);
@@ -191,6 +255,7 @@ class HDeviceServiceImplTest
         server.setId(id);
         server.setApp("live");
         server.setHost(host);
+        server.setApi_port(9992);
         server.setMedia_http_port(mediaHttpPort);
         return server;
     }
