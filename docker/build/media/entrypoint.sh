@@ -4,7 +4,7 @@ set -e
 cd /opt/media
 
 # ---- 可通过环境变量覆盖的参数（带默认值）----
-ZLM_SECRET="${ZLM_SECRET:-V3522025zlm0aA9ajn7UiOWi}"
+ZLM_SECRET="${ZLM_SECRET:-__INJECTED_AT_RUNTIME__}"
 PLATFORM_ID="${PLATFORM_ID:-34020000002000000001}"
 REALM="${REALM:-3402000000}"
 DEVICE_PASSWORD="${DEVICE_PASSWORD:-12345678}"
@@ -36,7 +36,7 @@ trap cleanup SIGTERM SIGINT
 
 # ---- 4. 启动 ZLMediaKit ----
 echo "[media] 启动 ZLMediaKit ..."
-./MediaServer -d -c config.ini > zlm.log 2>&1 &
+./MediaServer -c config.ini > zlm.log 2>&1 &
 PIDS="$PIDS $!"
 
 # 等待 ZLM HTTP 端口就绪
